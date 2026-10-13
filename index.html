@@ -1,0 +1,1325 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="実験レポート用の回路図をグリッド上で組み立て、PNG・SVG で書き出せるブラウザ上の回路図エディタ。">
+<title>回路図ノート</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44'%3E%3Cpath d='M0 22H10M34 22H44' stroke='black' stroke-width='4'/%3E%3Crect x='10' y='14' width='24' height='16' stroke='black' stroke-width='4' fill='white'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Layout: lab-notebook workbench. Parts list left, paper-white drawing sheet in the middle, properties right.
+   Monochrome by design: black type and strokes on Paper, hairline structure, pill controls, one filled button (書き出し). */
+:root{
+  --obsidian:#000000;
+  --graphite:#666666;
+  --smoke:#8f8f8f;
+  --paper:#ffffff;
+  --ash:#f1f1f1;
+  --hairline:#0000001f;
+  --whisper:#0000000a;
+  --scrim:#00000029;
+  --grid-dot:#0000002e;
+  --shadow-sm:rgba(0,0,0,.02) 0 4px 6px 0, rgba(0,0,0,.05) 0 0 2px 0;
+  --shadow-float:rgba(0,0,0,.04) 0 8px 24px 0, rgba(0,0,0,.06) 0 0 2px 0;
+  --font-ui:'Inter','Noto Sans JP',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Hiragino Sans',sans-serif;
+  --font-mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --r-pill:9999px;
+  --r-card:6px;
+  --r-link:4px;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%}
+body{margin:0;background:var(--paper);color:var(--obsidian);font-family:var(--font-ui);font-size:14px;
+  font-feature-settings:'calt' 1,'liga' 1;-webkit-font-smoothing:antialiased;overflow:hidden}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--obsidian);outline-offset:2px}
+
+#app{position:fixed;left:0;right:0;top:env(safe-area-inset-top,0px);bottom:env(safe-area-inset-bottom,0px);
+  display:grid;grid-template-rows:60px minmax(0,1fr)}
+
+/* ---------- header ---------- */
+.top{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 16px 0 20px;
+  border-bottom:1px solid var(--hairline);background:var(--paper);min-width:0}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.mark{font-size:15px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap;display:flex;align-items:center;gap:8px}
+.mark svg{flex:none}
+.title-input{border:1px solid transparent;background:transparent;border-radius:var(--r-pill);height:34px;padding:0 14px;
+  font-size:14px;font-weight:500;color:var(--graphite);width:min(320px,30vw);min-width:0}
+.title-input:hover{background:var(--whisper)}
+.title-input:focus{outline:none;border-color:var(--hairline);background:var(--paper);color:var(--obsidian)}
+.top-actions{display:flex;align-items:center;gap:4px;flex:none}
+
+.btn{height:36px;padding:0 18px;border-radius:var(--r-pill);border:1px solid transparent;background:transparent;
+  font-size:14px;font-weight:500;line-height:1;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  cursor:pointer;white-space:nowrap;transition:background .15s, box-shadow .15s, opacity .15s}
+.btn.ghost:hover{background:var(--whisper)}
+.btn.pill{border-color:var(--hairline)}
+.btn.pill:hover{box-shadow:var(--shadow-sm);background:var(--paper)}
+.btn.filled{background:var(--obsidian);color:var(--paper)}
+.btn.filled:hover{opacity:.82}
+.btn.sm{height:32px;padding:0 14px;font-size:13px}
+.btn:disabled{opacity:.35;cursor:default;box-shadow:none}
+.only-narrow{display:none!important}
+
+/* ---------- workspace ---------- */
+.work{display:grid;grid-template-columns:252px minmax(0,1fr) 280px;min-height:0;position:relative}
+.side{background:var(--paper);overflow-y:auto;overscroll-behavior:contain;min-height:0}
+.side-left{border-right:1px solid var(--hairline);padding:16px 14px 32px}
+.side-right{border-left:1px solid var(--hairline);padding:20px 20px 40px}
+
+.search{position:relative}
+.search svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none}
+.search input{width:100%;height:38px;border:1px solid var(--hairline);border-radius:var(--r-pill);background:transparent;
+  padding:0 14px 0 38px;font-size:16px;letter-spacing:-0.01em}
+.search input::placeholder{color:var(--graphite)}
+.search input:focus{outline:none;border-color:#00000052}
+
+.eyebrow{font-size:13px;font-weight:500;color:var(--graphite);letter-spacing:.01em}
+.pal-group{margin-top:22px;display:grid;gap:8px}
+.pal-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px}
+.pal-item{display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 4px 9px;border:0;background:transparent;
+  border-radius:var(--r-card);cursor:pointer;text-align:center;font-size:13px;font-weight:500;line-height:1.3}
+.pal-item:hover{background:var(--whisper)}
+.pal-item[aria-pressed="true"]{background:var(--ash)}
+.pal-item svg{width:64px;height:34px;overflow:visible}
+.pal-item svg *{vector-effect:non-scaling-stroke;stroke-width:1.35px}
+.pal-item svg .thick{stroke-width:3.2px}
+.pal-item span{color:var(--obsidian);word-break:keep-all;overflow-wrap:anywhere}
+.empty{color:var(--graphite);font-size:13px;margin:24px 4px}
+
+/* ---------- stage ---------- */
+.stage{position:relative;overflow:hidden;background-color:var(--paper);
+  background-image:radial-gradient(circle,var(--grid-dot) 1px,transparent 1.4px);min-width:0}
+.stage.nogrid{background-image:none}
+#svg{position:absolute;inset:0;width:100%;height:100%;touch-action:none;user-select:none;-webkit-user-select:none;display:block}
+.hint{position:absolute;left:16px;top:14px;right:16px;pointer-events:none;display:flex}
+.hint span{background:var(--paper);border:1px solid var(--hairline);border-radius:var(--r-pill);padding:6px 14px;
+  font-size:13px;line-height:1.51;color:var(--graphite);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hint b{color:var(--obsidian);font-weight:500}
+
+.toolbar{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:2px;padding:5px;
+  background:var(--paper);border:1px solid var(--hairline);border-radius:var(--r-pill);box-shadow:var(--shadow-float);
+  max-width:calc(100% - 24px);overflow-x:auto;scrollbar-width:none}
+.toolbar::-webkit-scrollbar{display:none}
+.tbtn{height:34px;min-width:34px;padding:0 14px;border:0;border-radius:var(--r-pill);background:transparent;cursor:pointer;
+  font-size:14px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;flex:none}
+.tbtn:hover{background:var(--whisper)}
+.tbtn[aria-pressed="true"]{background:var(--ash)}
+.tbtn.icon{padding:0;width:34px}
+.tbtn:disabled{opacity:.3;cursor:default;background:transparent}
+.tbtn kbd{font-family:var(--font-mono);font-size:11px;color:var(--smoke);font-weight:400}
+.tsep{width:1px;height:20px;background:var(--hairline);margin:0 4px;flex:none}
+#zoom-label{min-width:54px;font-variant-numeric:tabular-nums;font-size:13px;color:var(--graphite);padding:0 6px}
+#btn-finish{background:var(--ash)}
+
+/* ---------- properties ---------- */
+#props{display:grid;gap:28px}
+.pgroup{display:grid;gap:12px}
+.pgroup h2{margin:0;font-size:18px;font-weight:500;letter-spacing:-0.01em;line-height:1.32}
+.field{display:grid;gap:6px}
+.field>span,.flabel{font-size:13px;font-weight:500;color:var(--graphite)}
+.field input,.field select{height:38px;border:1px solid var(--hairline);border-radius:var(--r-pill);padding:0 16px;background:var(--paper);
+  font-size:16px;letter-spacing:-0.01em;width:100%;min-width:0}
+.field input:focus,.field select:focus{outline:none;border-color:#00000052}
+.field small{font-size:13px;color:var(--smoke);line-height:1.51}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{height:28px;padding:0 12px;border:1px solid var(--hairline);border-radius:var(--r-pill);background:transparent;font-size:13px;font-weight:500;cursor:pointer}
+.chip:hover{background:var(--whisper)}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg-btn{height:32px;padding:0 14px;border:1px solid var(--hairline);border-radius:var(--r-pill);background:transparent;cursor:pointer;
+  font-size:13px;font-weight:500;color:var(--graphite)}
+.seg-btn:hover{background:var(--whisper)}
+.seg-btn[aria-pressed="true"]{background:var(--ash);border-color:transparent;color:var(--obsidian)}
+.row{display:flex;flex-wrap:wrap;gap:8px}
+.check{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:500;cursor:pointer;line-height:1.4}
+.check input{width:16px;height:16px;accent-color:var(--obsidian);margin:0}
+.note{font-size:13px;line-height:1.51;color:var(--graphite);margin:0}
+.keys{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;font-size:13px;margin:0}
+.keys dt{white-space:nowrap}
+.keys dd{margin:0;color:var(--graphite)}
+kbd.k{font-family:var(--font-mono);font-size:12px;border:1px solid var(--hairline);border-radius:var(--r-link);padding:1px 6px;background:var(--paper);color:var(--obsidian)}
+
+/* ---------- modal ---------- */
+.modal{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
+.sheet{background:var(--paper);border-radius:var(--r-card);border:1px solid var(--hairline);box-shadow:var(--shadow-float);
+  width:min(920px,100%);max-height:calc(100% - 16px);overflow:auto;padding:24px}
+.sheet.narrow{width:min(420px,100%)}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
+.sheet-head h2{margin:0;font-size:22px;font-weight:500;letter-spacing:-0.01em;line-height:1.26}
+.ex-body{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:28px;align-items:start}
+.ex-preview{border:1px solid var(--hairline);border-radius:var(--r-card);min-height:260px;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--paper)}
+.ex-preview.clear{background-color:var(--paper);background-image:conic-gradient(var(--ash) 25%,transparent 0 50%,var(--ash) 0 75%,transparent 0);background-size:16px 16px}
+.ex-preview img{max-width:100%;max-height:52vh;display:block}
+.ex-opts{display:grid;gap:18px}
+.ex-size{font-size:13px;color:var(--graphite);font-variant-numeric:tabular-nums;margin:0;line-height:1.51}
+.ex-actions{display:grid;gap:8px}
+.ex-actions .btn{width:100%}
+
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--obsidian);color:var(--paper);
+  padding:10px 18px;border-radius:var(--r-pill);font-size:14px;font-weight:500;z-index:30;max-width:calc(100% - 32px);text-align:center;line-height:1.4}
+
+#measure{position:absolute;left:-10000px;top:0;width:10px;height:10px;visibility:hidden}
+
+/* ---------- narrow screens ---------- */
+@media (max-width:900px){
+  .work{grid-template-columns:minmax(0,1fr)}
+  .side{position:absolute;top:0;bottom:0;z-index:6;width:min(300px,88vw);transition:transform .22s ease;box-shadow:var(--shadow-float)}
+  .side-left{left:0;transform:translateX(-102%)}
+  .side-right{right:0;transform:translateX(102%)}
+  .side.open{transform:none}
+  .only-narrow{display:inline-flex!important}
+  .pgroup.only-narrow{display:grid!important}
+  .wide-only{display:none!important}
+  .ex-body{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:560px){
+  .title-input{display:none}
+  .top{padding:0 12px 0 16px}
+  .btn{padding:0 14px}
+  .toolbar{bottom:12px}
+  .tbtn kbd{display:none}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header class="top">
+    <div class="brand">
+      <span class="mark">
+        <svg width="22" height="14" viewBox="0 0 44 28" aria-hidden="true"><path d="M0 14H10M34 14H44" stroke="currentColor" stroke-width="3" fill="none"/><rect x="10" y="6" width="24" height="16" stroke="currentColor" stroke-width="3" fill="none"/></svg>
+        回路図ノート
+      </span>
+      <input id="doc-title" class="title-input" placeholder="無題の回路図" aria-label="図の名前" autocomplete="off">
+    </div>
+    <div class="top-actions">
+      <button class="btn ghost only-narrow" id="btn-parts" type="button">部品</button>
+      <button class="btn ghost only-narrow" id="btn-props" type="button">設定</button>
+      <button class="btn ghost wide-only" id="btn-new" type="button">新規</button>
+      <button class="btn ghost wide-only" id="btn-open" type="button">開く</button>
+      <button class="btn ghost wide-only" id="btn-save" type="button">保存</button>
+      <button class="btn filled" id="btn-export" type="button">書き出し</button>
+    </div>
+    <input type="file" id="file-input" accept=".json,application/json" hidden>
+  </header>
+
+  <main class="work">
+    <aside class="side side-left" id="side-left" aria-label="部品">
+      <div class="search">
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="#000" stroke-width="1.4" fill="none"/><path d="M11 11L14.5 14.5" stroke="#000" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <input id="part-search" type="search" placeholder="部品を検索" aria-label="部品を検索" autocomplete="off">
+      </div>
+      <div id="palette"></div>
+    </aside>
+
+    <section class="stage" id="stage">
+      <svg id="svg" xmlns="http://www.w3.org/2000/svg" aria-label="回路図キャンバス">
+        <g id="viewport"><g id="content"></g><g id="overlay" pointer-events="none"></g></g>
+      </svg>
+      <div class="hint"><span id="hint"></span></div>
+      <div class="toolbar" role="toolbar" aria-label="ツール">
+        <button class="tbtn" data-tool="select" type="button" aria-pressed="true">選択 <kbd>V</kbd></button>
+        <button class="tbtn" data-tool="wire" type="button" aria-pressed="false">配線 <kbd>W</kbd></button>
+        <button class="tbtn" data-tool="text" type="button" aria-pressed="false">文字 <kbd>T</kbd></button>
+        <button class="tbtn" id="btn-finish" type="button" hidden>配線を終了</button>
+        <span class="tsep"></span>
+        <button class="tbtn icon" id="btn-undo" type="button" aria-label="元に戻す" title="元に戻す (⌘/Ctrl+Z)">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5L2.5 6.5L5.5 9.5M3 6.5H10A3.5 3.5 0 0 1 10 13.5H7" fill="none" stroke="#000" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="tbtn icon" id="btn-redo" type="button" aria-label="やり直す" title="やり直す (⌘/Ctrl+Shift+Z)">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 3.5L13.5 6.5L10.5 9.5M13 6.5H6A3.5 3.5 0 0 0 6 13.5H9" fill="none" stroke="#000" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <span class="tsep"></span>
+        <button class="tbtn icon" id="btn-zout" type="button" aria-label="縮小">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8H13" stroke="#000" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <button class="tbtn" id="zoom-label" type="button" title="100% に戻す">100%</button>
+        <button class="tbtn icon" id="btn-zin" type="button" aria-label="拡大">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8H13M8 3V13" stroke="#000" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+        <button class="tbtn" id="btn-fit" type="button" title="全体を表示 (0)">全体</button>
+      </div>
+    </section>
+
+    <aside class="side side-right" id="side-right" aria-label="プロパティ">
+      <div id="props"></div>
+    </aside>
+  </main>
+</div>
+
+<div class="modal" id="export-modal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="ex-title">
+    <div class="sheet-head">
+      <h2 id="ex-title">書き出し</h2>
+      <button class="btn ghost sm" id="ex-close" type="button">閉じる</button>
+    </div>
+    <div class="ex-body">
+      <div class="ex-preview" id="ex-preview"><img id="ex-img" alt="書き出す回路図のプレビュー"></div>
+      <div class="ex-opts">
+        <div class="field"><span class="flabel">背景</span><div class="seg" data-ex="bg"></div></div>
+        <div class="field"><span class="flabel">解像度 (PNG)</span><div class="seg" data-ex="scale"></div></div>
+        <div class="field"><span class="flabel">余白</span><div class="seg" data-ex="margin"></div></div>
+        <p class="ex-size" id="ex-size"></p>
+        <div class="ex-actions">
+          <button class="btn filled" id="ex-png" type="button">PNG で保存</button>
+          <button class="btn pill" id="ex-copy" type="button">画像をコピー</button>
+          <button class="btn pill" id="ex-svg" type="button">SVG で保存</button>
+        </div>
+        <p class="note">Word へは「画像をコピー」して貼り付けるのが手早い方法です。PNG は解像度を上げても Word に入れたときの大きさが変わらないよう DPI を記録しています。SVG は Microsoft 365 の Word なら拡大しても線がにじみません。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="confirm-modal" hidden>
+  <div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="cf-title">
+    <div class="sheet-head"><h2 id="cf-title">新しい回路図</h2></div>
+    <p class="note" style="margin-bottom:20px">今の回路図を消去して白紙から始めます。残しておく場合は先に「保存」してください。</p>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn ghost" id="cf-cancel" type="button">キャンセル</button>
+      <button class="btn filled" id="cf-ok" type="button">消去して新規作成</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+<svg id="measure" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+
+<script>
+(() => {
+'use strict';
+
+/* ================= basics ================= */
+const G = 20;
+const $ = s => document.querySelector(s);
+const f = n => Math.round(n * 100) / 100;
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const uid = () => Math.random().toString(36).slice(2, 10);
+const clone = o => JSON.parse(JSON.stringify(o));
+const snap = v => Math.round(v / G) * G;
+const near = (a, b) => Math.abs(a[0]-b[0]) < 0.5 && Math.abs(a[1]-b[1]) < 0.5;
+const textW = s => { let w = 0; for (const ch of String(s)) w += ch.charCodeAt(0) > 0x2e80 ? 1 : 0.6; return w; };
+const STORE_KEY = 'kairozu-note:v1';
+
+const FONTS = {
+  sans: "'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif",
+  serif: "'Times New Roman', Times, 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif"
+};
+const DEFAULT_SETTINGS = { std: 'jis', sw: 1.6, font: 'sans', fs: 14, sub: true, ital: false };
+
+/* ================= symbol helpers ================= */
+function head(tx, ty, dx, dy, len = 7, w = 3.2) {
+  const L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L, bx = tx - ux * len, by = ty - uy * len;
+  return `<path d="M${f(tx)} ${f(ty)}L${f(bx - uy * w)} ${f(by + ux * w)}L${f(bx + uy * w)} ${f(by - ux * w)}Z" fill="#000" stroke="none"/>`;
+}
+function arrow(x1, y1, x2, y2, len = 7) {
+  const L = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / L, uy = (y2 - y1) / L;
+  return `<path d="M${x1} ${y1}L${f(x2 - ux * (len - 1))} ${f(y2 - uy * (len - 1))}"/>` + head(x2, y2, x2 - x1, y2 - y1, len, len * 0.45);
+}
+const hump = (n, dx, dy, sweep) => Array(n).fill(`a6 6 0 0 ${sweep} ${dx} ${dy}`).join('');
+
+function richText(str, size, auto) {
+  str = String(str ?? '');
+  const segs = [];
+  const am = auto && str.match(/^([A-Za-z]+)(\d+)$/);
+  if (am) segs.push([am[1], 0], [am[2], 1]);
+  else {
+    const re = /_\{([^}]*)\}|_([^\s_]+)/g; let last = 0, mm;
+    while ((mm = re.exec(str))) {
+      if (mm.index > last) segs.push([str.slice(last, mm.index), 0]);
+      segs.push([mm[1] ?? mm[2], 1]); last = re.lastIndex;
+    }
+    if (last < str.length) segs.push([str.slice(last), 0]);
+  }
+  const d = f(size * 0.3), fs2 = f(size * 0.7);
+  let out = '', down = false;
+  for (const [t, sub] of segs) {
+    if (sub && !down) { out += `<tspan dy="${d}" font-size="${fs2}">${esc(t)}</tspan>`; down = true; }
+    else if (sub) out += `<tspan font-size="${fs2}">${esc(t)}</tspan>`;
+    else if (down) { out += `<tspan dy="${-d}">${esc(t)}</tspan>`; down = false; }
+    else out += esc(t);
+  }
+  return out;
+}
+function txtEl(str, x, y, anchor, size, o = {}) {
+  return `<text x="${f(x)}" y="${f(y)}" text-anchor="${anchor}" font-size="${size}" fill="#000" stroke="none"${o.center ? ' dy="0.35em"' : ''}${o.italic ? ' font-style="italic"' : ''}>${richText(str, size, o.auto)}</text>`;
+}
+
+const RES_JIS = '<path d="M-40 0H-24M24 0H40"/><rect x="-24" y="-8" width="48" height="16"/>';
+const RES_ANSI = '<path d="M-40 0H-24L-20 -8L-12 8L-4 -8L4 8L12 -8L20 8L24 0H40"/>';
+const res = s => s.std === 'ansi' ? RES_ANSI : RES_JIS;
+const CAP = '<path d="M-40 0H-5M5 0H40M-5 -14V14M5 -14V14"/>';
+const D_TRI = '<path d="M-10 -10L10 0L-10 10Z"/>';
+const D_BASE = '<path d="M-40 0H-10M10 0H40M10 -10V10"/>' + D_TRI;
+const TR = '<circle cx="4" r="24"/><path d="M-40 0H-8M-8 -15V15M-8 -6L20 -22V-40M-8 6L20 22V40"/>';
+const CIRC = '<path d="M-40 0H-16M16 0H40"/><circle r="16"/>';
+const meterUp = (s, c) => { const t = c.sym || ''; return txtEl(t, 0, 0, 'middle', t.length > 1 ? 12 : 16, { center: true }); };
+const meterTexts = c => c.pol ? [{ x: -25, y: -11, t: '+', s: 12 }] : [];
+
+/* pins/bbox in local coordinates (horizontal orientation, pin 0 on the left) */
+const DEFS = {
+  resistor:   { name: '抵抗', cat: '受動素子', kw: 'resistor teikou r', prefix: 'R', value: '100 Ω', units: ['Ω','kΩ','MΩ'], bbox: [-24,-9,24,9], draw: res },
+  vresistor:  { name: '可変抵抗', cat: '受動素子', kw: 'variable resistor kahen vr potentiometer', prefix: 'VR', value: '10 kΩ', units: ['Ω','kΩ','MΩ'], bbox: [-24,-16,24,16], draw: s => res(s) + arrow(-20, 15, 22, -16) },
+  capacitor:  { name: 'コンデンサ', cat: '受動素子', kw: 'capacitor kondensa c', prefix: 'C', value: '0.1 μF', units: ['pF','nF','μF'], bbox: [-6,-14,6,14], draw: () => CAP },
+  ecap:       { name: '電解コンデンサ', cat: '受動素子', kw: 'electrolytic capacitor denkai c', prefix: 'C', value: '100 μF', units: ['μF','mF'], bbox: [-9,-14,6,14],
+                draw: () => '<path d="M-40 0H-8M5 0H40M5 -14V14"/><rect x="-8" y="-14" width="5" height="28"/>', texts: () => [{ x: -16, y: -12, t: '+', s: 12 }] },
+  vcap:       { name: '可変コンデンサ', cat: '受動素子', kw: 'variable capacitor vc', prefix: 'VC', value: '', units: ['pF','nF','μF'], bbox: [-14,-16,14,16], draw: () => CAP + arrow(-14, 14, 15, -16) },
+  inductor:   { name: 'コイル', cat: '受動素子', kw: 'inductor coil koiru l', prefix: 'L', value: '10 mH', units: ['μH','mH','H'], bbox: [-24,-8,24,4], draw: () => `<path d="M-40 0H-24${hump(4,12,0,1)}M24 0H40"/>` },
+  transformer:{ name: '変圧器', cat: '受動素子', kw: 'transformer hen-atsuki trans t', prefix: 'T', value: '', units: [], pins: [[-40,-40],[-40,40],[40,-40],[40,40]], bbox: [-40,-40,40,40], labelMode: 'top',
+                draw: () => `<path d="M-40 -40H-12V-24${hump(4,0,12,1)}V40H-40M40 -40H12V-24${hump(4,0,12,0)}V40H40M-3 -26V26M3 -26V26"/>` },
+
+  battery:    { name: '直流電源 (電池)', cat: '電源', kw: 'battery dc denchi e', prefix: 'E', value: '1.5 V', units: ['V','mV'], bbox: [-5,-16,7,16],
+                draw: s => `<path d="M-40 0H-4M5 0H40M-4 -16V16"/><path class="thick" d="M5 -8V8" stroke-width="${f(s.sw * 2.4)}" stroke-linecap="butt"/>`, texts: () => [{ x: -13, y: -13, t: '+', s: 12 }] },
+  dcsource:   { name: '直流電圧源', cat: '電源', kw: 'dc voltage source e', prefix: 'E', value: '5 V', units: ['V','mV'], bbox: [-16,-16,16,16], draw: () => CIRC,
+                texts: () => [{ x: -7, y: 0, t: '+', s: 13 }, { x: 7, y: 0, t: '−', s: 13 }] },
+  acsource:   { name: '交流電源', cat: '電源', kw: 'ac source kouryuu e', prefix: 'E', value: '100 V', units: ['V','mV','Hz'], bbox: [-16,-16,16,16], draw: () => CIRC,
+                up: () => '<path d="M-9 0C-6 -9 -3 -9 0 0S6 9 9 0"/>' },
+  isource:    { name: '電流源', cat: '電源', kw: 'current source denryuugen i', prefix: 'I', value: '1 mA', units: ['A','mA','μA'], bbox: [-16,-16,16,16], draw: () => CIRC + arrow(-9, 0, 10, 0, 6) },
+
+  diode:      { name: 'ダイオード', cat: '半導体', kw: 'diode daiodo d', prefix: 'D', value: '', units: [], bbox: [-10,-10,10,10], draw: () => D_BASE },
+  zener:      { name: 'ツェナーダイオード', cat: '半導体', kw: 'zener diode zd', prefix: 'ZD', value: '', units: ['V'], bbox: [-10,-13,14,13],
+                draw: () => '<path d="M-40 0H-10M10 0H40M6 -13L10 -10V10L14 13"/>' + D_TRI },
+  led:        { name: '発光ダイオード', cat: '半導体', kw: 'led hakkou diode', prefix: 'LED', value: '', units: [], bbox: [-10,-22,16,10], draw: () => D_BASE + arrow(0, -13, 9, -22, 5) + arrow(7, -9, 16, -18, 5) },
+  npn:        { name: 'トランジスタ NPN', cat: '半導体', kw: 'transistor npn tr bjt', prefix: 'Tr', value: '', units: [], pins: [[-40,0],[20,-40],[20,40]], bbox: [-20,-24,28,24], labelMode: 'right',
+                draw: () => TR + head(14.4, 18.8, 28, 16) },
+  pnp:        { name: 'トランジスタ PNP', cat: '半導体', kw: 'transistor pnp tr bjt', prefix: 'Tr', value: '', units: [], pins: [[-40,0],[20,-40],[20,40]], bbox: [-20,-24,28,24], labelMode: 'right',
+                draw: () => TR + head(0.4, 10.8, -28, -16) },
+  opamp:      { name: 'オペアンプ', cat: '半導体', kw: 'opamp operational amplifier op', prefix: 'OP', value: '', units: [], pins: [[-60,-20],[-60,20],[60,0]], bbox: [-40,-40,40,40], labelMode: 'top',
+                draw: () => '<path d="M-60 -20H-40M-60 20H-40M40 0H60"/><path d="M-40 -40V40L40 0Z"/>', texts: () => [{ x: -29, y: -20, t: '−', s: 15 }, { x: -29, y: 20, t: '+', s: 15 }] },
+
+  voltmeter:  { name: '電圧計', cat: '計測器', kw: 'voltmeter denatsukei v', prefix: '', sym: 'V', pol: true, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: true },
+  ammeter:    { name: '電流計', cat: '計測器', kw: 'ammeter denryuukei a', prefix: '', sym: 'A', pol: true, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: true },
+  galvanometer:{ name: '検流計', cat: '計測器', kw: 'galvanometer kenryuukei g', prefix: '', sym: 'G', pol: false, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: true },
+  wattmeter:  { name: '電力計', cat: '計測器', kw: 'wattmeter denryokukei w', prefix: '', sym: 'W', pol: false, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: true },
+  box:        { name: '測定器・装置', cat: '計測器', kw: 'box oscilloscope function generator osc block souchi', prefix: '', value: 'オシロスコープ', units: [], inner: true,
+                pins: [[-60,0],[60,0]], bbox: [-50,-30,50,30], labelMode: 'top',
+                draw: () => '<path d="M-60 0H-50M50 0H60"/><rect x="-50" y="-30" width="100" height="60"/>',
+                up: (s, c) => { const v = c.value || ''; return txtEl(v, 0, 0, 'middle', f(Math.min(14, 86 / Math.max(1, textW(v)))), { center: true }); } },
+
+  switch:     { name: 'スイッチ', cat: '配線・その他', kw: 'switch suicchi sw', prefix: 'SW', value: '', units: [], bbox: [-19,-15,19,4],
+                draw: () => '<path d="M-40 0H-18.6M18.6 0H40M-14 -1.5L14 -14"/><circle cx="-16" r="2.6" fill="#fff"/><circle cx="16" r="2.6" fill="#fff"/>' },
+  lamp:       { name: 'ランプ', cat: '配線・その他', kw: 'lamp ranpu bulb', prefix: 'La', value: '', units: ['V','W'], bbox: [-14,-14,14,14], draw: () => '<path d="M-40 0H-14M14 0H40M-10 -10L10 10M10 -10L-10 10"/><circle r="14"/>' },
+  ground:     { name: '接地', cat: '配線・その他', kw: 'ground earth gnd setchi', prefix: '', value: '', units: [], pins: [[0,0]], bbox: [-13,0,13,24], labelMode: 'right', draw: () => '<path d="M0 0V12M-13 12H13M-8 18H8M-3 24H3"/>' },
+  terminal:   { name: '端子', cat: '配線・その他', kw: 'terminal tanshi', prefix: '', value: '', units: [], pins: [[0,0]], bbox: [-5,-5,5,5], labelMode: 'top', draw: () => '<circle r="4" fill="#fff"/>' },
+  dot:        { name: '接続点', cat: '配線・その他', kw: 'junction dot setsuzokuten', prefix: '', value: '', units: [], pins: [[0,0]], bbox: [-4,-4,4,4], labelMode: 'top', draw: s => `<circle r="${f(s.sw * 2)}" fill="#000" stroke="none"/>` },
+};
+for (const k in DEFS) if (!DEFS[k].pins) DEFS[k].pins = [[-40,0],[40,0]];
+const CATS = ['受動素子', '電源', '半導体', '計測器', '配線・その他'];
+
+/* ================= state ================= */
+let doc = blankDoc();
+let view = { x: 0, y: 0, k: 1 };
+let tool = 'select', placeType = null;
+const ghost = { rot: 0, flip: false };
+let sel = new Set();
+let hover = null, draft = null, cursor = null, drag = null, pinch = null;
+let spaceDown = false, showGrid = true;
+const pointers = new Map();
+let hist = [], hi = -1, clip = null, pasteN = 0;
+const EX = { bg: 'white', scale: 2, margin: 20 };
+
+const svg = $('#svg'), viewportG = $('#viewport'), contentG = $('#content'), overlayG = $('#overlay'), stage = $('#stage'), measure = $('#measure');
+
+function blankDoc() { return { app: 'kairozu-note', v: 1, title: '', settings: { ...DEFAULT_SETTINGS }, comps: [], wires: [], texts: [] }; }
+function normalize(o) {
+  const d = blankDoc();
+  d.title = typeof o.title === 'string' ? o.title : '';
+  d.settings = { ...DEFAULT_SETTINGS, ...(o.settings || {}) };
+  d.comps = (o.comps || []).filter(c => c && DEFS[c.type]).map(c => ({ id: c.id || uid(), type: c.type, x: +c.x || 0, y: +c.y || 0, rot: (c.rot | 0) % 4, flip: !!c.flip,
+    label: c.label ?? '', value: c.value ?? '', sym: c.sym ?? DEFS[c.type].sym, pol: c.pol ?? DEFS[c.type].pol, lp: c.lp || 'auto', lo: c.lo || null }));
+  d.wires = (o.wires || []).filter(w => w && Array.isArray(w.pts) && w.pts.length >= 2).map(w => ({ id: w.id || uid(), pts: w.pts.map(p => [+p[0], +p[1]]) }));
+  d.texts = (o.texts || []).filter(t => t && typeof t.text === 'string').map(t => ({ id: t.id || uid(), x: +t.x || 0, y: +t.y || 0, text: t.text, size: +t.size || 14 }));
+  return d;
+}
+
+/* Example shown on first visit: measuring the voltage across R2 in a divider */
+function sampleDoc() {
+  const c = (type, x, y, rot, label, value) => ({ id: uid(), type, x, y, rot, flip: false, label, value, sym: DEFS[type].sym, pol: DEFS[type].pol, lp: 'auto', lo: null });
+  const d = blankDoc();
+  d.title = '例：分圧回路の電圧測定';
+  d.comps = [
+    c('battery', 100, 220, 1, 'E', '3.0 V'),
+    c('switch', 180, 100, 0, 'SW', ''),
+    c('ammeter', 300, 100, 0, '', ''),
+    c('resistor', 420, 180, 1, 'R1', '1 kΩ'),
+    c('resistor', 420, 300, 1, 'R2', '2 kΩ'),
+    c('voltmeter', 540, 300, 1, '', ''),
+  ];
+  const w = pts => ({ id: uid(), pts });
+  d.wires = [
+    w([[100,180],[100,100],[140,100]]),
+    w([[220,100],[260,100]]),
+    w([[340,100],[420,100],[420,140]]),
+    w([[420,220],[420,260]]),
+    w([[420,340],[420,380],[100,380],[100,260]]),
+    w([[540,260],[540,240],[420,240]]),
+    w([[540,340],[540,380],[420,380]]),
+  ];
+  return d;
+}
+
+/* ================= geometry ================= */
+function tp(c, x, y) { if (c.flip) y = -y; for (let i = 0; i < c.rot; i++) { const t = x; x = -y; y = t; } return [c.x + x, c.y + y]; }
+const tf = c => `translate(${c.x} ${c.y})${c.rot ? ` rotate(${c.rot * 90})` : ''}${c.flip ? ' scale(1 -1)' : ''}`;
+const pinsOf = c => DEFS[c.type].pins.map(p => tp(c, p[0], p[1]));
+function boxOf(pts) { const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); return { x1: Math.min(...xs), y1: Math.min(...ys), x2: Math.max(...xs), y2: Math.max(...ys) }; }
+function bboxOf(c) { const b = DEFS[c.type].bbox; return boxOf([tp(c, b[0], b[1]), tp(c, b[2], b[1]), tp(c, b[0], b[3]), tp(c, b[2], b[3])]); }
+function hitBoxOf(c) { const b = bboxOf(c); return boxOf([[b.x1, b.y1], [b.x2, b.y2], ...pinsOf(c)]); }
+const inBox = (p, b, pad = 0) => p[0] >= b.x1 - pad && p[0] <= b.x2 + pad && p[1] >= b.y1 - pad && p[1] <= b.y2 + pad;
+function distSeg(p, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy;
+  let t = L ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L : 0; t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy);
+}
+const onSeg = (p, a, b) => distSeg(p, a, b) < 0.5;
+const onInterior = (p, a, b) => onSeg(p, a, b) && !near(p, a) && !near(p, b);
+const wireD = pts => 'M' + pts.map(p => `${p[0]} ${p[1]}`).join('L');
+const findComp = id => doc.comps.find(c => c.id === id);
+const findWire = id => doc.wires.find(w => w.id === id);
+const findText = id => doc.texts.find(t => t.id === id);
+
+function cleanup(pts) {
+  const a = [];
+  for (const p of pts) { const l = a[a.length - 1]; if (!l || l[0] !== p[0] || l[1] !== p[1]) a.push([p[0], p[1]]); }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let i = 1; i < a.length - 1; i++) {
+      const p = a[i - 1], q = a[i], r = a[i + 1];
+      if ((p[0] === q[0] && q[0] === r[0]) || (p[1] === q[1] && q[1] === r[1]) || (p[0] === r[0] && p[1] === r[1])) { a.splice(i, 1); changed = true; break; }
+    }
+  }
+  return a;
+}
+
+/* Move vertex i of an orthogonal polyline and keep every segment horizontal or vertical. */
+function dragVertex(src, i, np) {
+  const o = src.map(p => p.slice()), pts = src.map(p => p.slice()), n = pts.length;
+  pts[i] = np.slice();
+  const horiz = (a, b) => a[1] === b[1];
+  if (i < n - 1) {
+    const j = i + 1, h = horiz(o[i], o[j]);
+    if (j === n - 1) { if (np[0] !== o[j][0] && np[1] !== o[j][1]) pts.splice(j, 0, h ? [np[0], o[j][1]] : [o[j][0], np[1]]); }
+    else if (h) pts[j][1] = np[1]; else pts[j][0] = np[0];
+  }
+  if (i > 0) {
+    const j = i - 1, h = horiz(o[i], o[j]);
+    if (j === 0) { if (np[0] !== o[0][0] && np[1] !== o[0][1]) pts.splice(i, 0, h ? [np[0], o[0][1]] : [o[0][0], np[1]]); }
+    else if (h) pts[j][1] = np[1]; else pts[j][0] = np[0];
+  }
+  return cleanup(pts);
+}
+/* Slide segment i sideways; the wire's two ends stay where they are. */
+function moveSegment(orig, i, dx, dy) {
+  const pts = orig.map(p => p.slice()), a = pts[i], b = pts[i + 1], n = pts.length;
+  if (a[1] === b[1]) { if (!dy) return pts; a[1] += dy; b[1] += dy; } else { if (!dx) return pts; a[0] += dx; b[0] += dx; }
+  if (i + 1 === n - 1) pts.push(orig[n - 1].slice());
+  if (i === 0) pts.unshift(orig[0].slice());
+  return cleanup(pts);
+}
+/* After components move/rotate, pull the attached ends of unselected wires along. */
+function fixAttachments(orig, cur, movedIds) {
+  if (!movedIds.size) return;
+  const origComps = orig.comps.filter(c => movedIds.has(c.id));
+  for (const w of cur.wires) {
+    if (sel.has(w.id)) continue;
+    const ow = orig.wires.find(x => x.id === w.id); if (!ow) continue;
+    for (const end of [0, 1]) {
+      const op = end ? ow.pts[ow.pts.length - 1] : ow.pts[0];
+      for (const oc of origComps) {
+        const pi = pinsOf(oc).findIndex(p => near(p, op));
+        if (pi < 0) continue;
+        const nc = cur.comps.find(c => c.id === oc.id); if (!nc) break;
+        const np = pinsOf(nc)[pi].map(Math.round);
+        const idx = end ? w.pts.length - 1 : 0;
+        if (!near(np, w.pts[idx])) w.pts = dragVertex(w.pts, idx, np);
+        break;
+      }
+    }
+  }
+}
+
+function junctions() {
+  const cnt = new Map(), key = p => `${Math.round(p[0])},${Math.round(p[1])}`;
+  const add = p => cnt.set(key(p), (cnt.get(key(p)) || 0) + 1);
+  const skip = new Set();
+  for (const w of doc.wires) for (let i = 0; i < w.pts.length - 1; i++) { add(w.pts[i]); add(w.pts[i + 1]); }
+  for (const c of doc.comps) {
+    if (c.type === 'dot' || c.type === 'terminal') { pinsOf(c).forEach(p => skip.add(key(p))); continue; }
+    pinsOf(c).forEach(add);
+  }
+  const out = [];
+  for (const [k, n] of cnt) {
+    if (skip.has(k)) continue;
+    const p = k.split(',').map(Number);
+    let through = 0;
+    for (const w of doc.wires) for (let i = 0; i < w.pts.length - 1; i++) if (onInterior(p, w.pts[i], w.pts[i + 1])) through++;
+    if (n + 2 * through >= 3) out.push(p);
+  }
+  return out;
+}
+function isConn(p) {
+  for (const c of doc.comps) for (const q of pinsOf(c)) if (near(q, p)) return true;
+  for (const w of doc.wires) for (let i = 0; i < w.pts.length - 1; i++) if (onSeg(p, w.pts[i], w.pts[i + 1])) return true;
+  return false;
+}
+
+/* ================= rendering ================= */
+const strokeAttrs = s => `stroke="#000" stroke-width="${s.sw}" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
+
+function compMarkup(c, s) {
+  const d = DEFS[c.type]; if (!d) return '';
+  let m = `<g transform="${tf(c)}">${d.draw(s, c)}</g>`;
+  for (const t of (d.texts ? d.texts(c) : [])) { const [x, y] = tp(c, t.x, t.y); m += txtEl(t.t, x, y, 'middle', t.s, { center: true }); }
+  if (d.up) m += `<g transform="translate(${c.x} ${c.y})">${d.up(s, c)}</g>`;
+  return m;
+}
+function labelSide(c) {
+  if (c.lp && c.lp !== 'auto') return c.lp;
+  const pins = pinsOf(c);
+  if (pins.length === 2) return Math.abs(pins[0][1] - pins[1][1]) < 1 ? 'top' : 'right';
+  return DEFS[c.type].labelMode || 'right';
+}
+function labelLayout(c, s) {
+  const lines = [];
+  if (c.label) lines.push([c.label, true]);
+  if (c.value && !DEFS[c.type].inner) lines.push([c.value, false]);
+  if (!lines.length) return null;
+  const b = bboxOf(c), fs = s.fs, lh = fs * 1.25, H = lines.length * lh, gap = 6, side = labelSide(c);
+  let x, y, anchor;
+  if (side === 'top') { x = (b.x1 + b.x2) / 2; y = b.y1 - gap - H; anchor = 'middle'; }
+  else if (side === 'bottom') { x = (b.x1 + b.x2) / 2; y = b.y2 + gap; anchor = 'middle'; }
+  else if (side === 'left') { x = b.x1 - gap - 2; y = (b.y1 + b.y2) / 2 - H / 2; anchor = 'end'; }
+  else { x = b.x2 + gap + 2; y = (b.y1 + b.y2) / 2 - H / 2; anchor = 'start'; }
+  if (c.lo) { x += c.lo[0]; y += c.lo[1]; }
+  return { x, y, anchor, lines, lh, fs, H };
+}
+function labelMarkup(c, s, live) {
+  const L = labelLayout(c, s); if (!L) return '';
+  let m = '';
+  L.lines.forEach(([t, isLabel], i) => { m += txtEl(t, L.x, L.y + i * L.lh + L.fs * 0.88, L.anchor, L.fs, { auto: isLabel && s.sub, italic: isLabel && s.ital }); });
+  if (!live) return m;
+  const w = Math.max(...L.lines.map(l => textW(l[0]))) * L.fs + 6;
+  const x0 = L.anchor === 'middle' ? L.x - w / 2 : L.anchor === 'end' ? L.x - w : L.x;
+  return `<g data-lab="${c.id}" style="cursor:move"><rect x="${f(x0 - 3)}" y="${f(L.y - 2)}" width="${f(w + 6)}" height="${f(L.H + 4)}" fill="#000" fill-opacity="0" stroke="none"/>${m}</g>`;
+}
+function renderContent(live) {
+  const s = doc.settings;
+  let m = `<g ${strokeAttrs(s)} font-family="${FONTS[s.font]}">`;
+  for (const w of doc.wires) m += `<path${live ? ` data-w="${w.id}"` : ''} d="${wireD(w.pts)}"/>`;
+  for (const c of doc.comps) m += live ? `<g data-c="${c.id}">${compMarkup(c, s)}</g>` : compMarkup(c, s);
+  for (const p of junctions()) m += `<circle cx="${p[0]}" cy="${p[1]}" r="${f(s.sw * 2)}" fill="#000" stroke="none"/>`;
+  for (const c of doc.comps) m += labelMarkup(c, s, live);
+  for (const t of doc.texts) m += `<text${live ? ` data-t="${t.id}" style="cursor:move"` : ''} x="${t.x}" y="${t.y}" font-size="${t.size}" fill="#000" stroke="none">${richText(t.text, t.size, false)}</text>`;
+  return m + '</g>';
+}
+function renderCanvas() { contentG.innerHTML = renderContent(true); renderOverlay(); }
+
+function textBox(id) { const el = contentG.querySelector(`[data-t="${id}"]`); if (!el) return null; const b = el.getBBox(); return { x1: b.x, y1: b.y, x2: b.x + b.width, y2: b.y + b.height }; }
+function highlight(id, strong) {
+  const k = view.k, c = findComp(id);
+  const boxRect = (b, pad) => `<rect x="${f(b.x1 - pad)}" y="${f(b.y1 - pad)}" width="${f(b.x2 - b.x1 + pad * 2)}" height="${f(b.y2 - b.y1 + pad * 2)}" rx="${f(4 / k)}" fill="#000" fill-opacity="${strong ? .04 : .03}"${strong ? ` stroke="#000" stroke-width="${f(1 / k)}" stroke-dasharray="${f(4 / k)} ${f(3 / k)}"` : ' stroke="none"'}/>`;
+  if (c) return boxRect(hitBoxOf(c), 6);
+  const w = findWire(id);
+  if (w) return `<path d="${wireD(w.pts)}" fill="none" stroke="#000" stroke-opacity="${strong ? .16 : .08}" stroke-width="${f(10 / k)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const t = findText(id);
+  if (t) { const b = textBox(id); if (b) return boxRect(b, 4); }
+  return '';
+}
+function routeTo(a, b) {
+  if (a[0] === b[0] || a[1] === b[1]) return [b];
+  let h;
+  const n = draft ? draft.pts.length : 0;
+  if (n >= 2) { const p = draft.pts[n - 2], q = draft.pts[n - 1]; h = p[1] !== q[1]; }
+  else h = Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1]);
+  return h ? [[b[0], a[1]], b] : [[a[0], b[1]], b];
+}
+function renderOverlay() {
+  const k = view.k, s = doc.settings; let m = '';
+  if (tool === 'select' && hover && !sel.has(hover) && !drag) m += highlight(hover, false);
+  for (const id of sel) m += highlight(id, true);
+  if (tool === 'select' && sel.size === 1) {
+    const w = findWire([...sel][0]);
+    if (w) w.pts.forEach((p, i) => { m += `<rect data-handle="${w.id}:${i}" x="${f(p[0] - 4.5 / k)}" y="${f(p[1] - 4.5 / k)}" width="${f(9 / k)}" height="${f(9 / k)}" rx="${f(2 / k)}" fill="#fff" stroke="#000" stroke-width="${f(1.2 / k)}" pointer-events="all" style="cursor:move"/>`; });
+  }
+  if (drag && drag.kind === 'band') {
+    const b = boxOf([drag.start, drag.cur]);
+    m += `<rect x="${b.x1}" y="${b.y1}" width="${b.x2 - b.x1}" height="${b.y2 - b.y1}" fill="#000" fill-opacity=".04" stroke="#000" stroke-opacity=".4" stroke-width="${f(1 / k)}"/>`;
+  }
+  if (tool === 'place' && cursor && placeType) {
+    const d = DEFS[placeType];
+    const c = { id: 'ghost', type: placeType, x: cursor[0], y: cursor[1], rot: ghost.rot, flip: ghost.flip, label: '', value: d.inner ? d.value : '', sym: d.sym, pol: d.pol };
+    m += `<g opacity=".45" ${strokeAttrs(s)} font-family="${FONTS[s.font]}">${compMarkup(c, s)}</g>`;
+  }
+  if (tool === 'wire') {
+    for (const c of doc.comps) for (const p of pinsOf(c)) m += `<circle cx="${p[0]}" cy="${p[1]}" r="${f(3 / k)}" fill="#fff" stroke="#8f8f8f" stroke-width="${f(1 / k)}"/>`;
+    if (draft) {
+      let pts = draft.pts.slice();
+      if (cursor) pts = pts.concat(routeTo(pts[pts.length - 1], cursor));
+      m += `<path d="${wireD(pts)}" fill="none" stroke="#000" stroke-opacity=".55" stroke-width="${s.sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+    if (cursor) {
+      const conn = isConn(cursor);
+      m += `<circle cx="${cursor[0]}" cy="${cursor[1]}" r="${f((conn ? 7 : 4.5) / k)}" fill="#000" fill-opacity="${conn ? .1 : 0}" stroke="#000" stroke-width="${f(1.2 / k)}"/>`;
+    }
+  }
+  overlayG.innerHTML = m;
+}
+
+function iconSVG(t) {
+  const d = DEFS[t];
+  const c = { id: 'i', type: t, x: 0, y: 0, rot: 0, flip: false, label: '', value: '', sym: d.sym, pol: false };
+  const b = boxOf([[d.bbox[0], d.bbox[1]], [d.bbox[2], d.bbox[3]], ...d.pins]);
+  const pad = 3, s = { ...doc.settings, sw: 2 };
+  return `<svg viewBox="${b.x1 - pad} ${b.y1 - pad} ${b.x2 - b.x1 + pad * 2} ${b.y2 - b.y1 + pad * 2}" aria-hidden="true"><g ${strokeAttrs(s)} font-family="${FONTS.sans}">${compMarkup(c, s)}</g></svg>`;
+}
+function renderPalette() {
+  const q = $('#part-search').value.trim().toLowerCase();
+  let m = '';
+  for (const cat of CATS) {
+    const types = Object.keys(DEFS).filter(t => DEFS[t].cat === cat && (!q || `${DEFS[t].name} ${DEFS[t].kw}`.toLowerCase().includes(q)));
+    if (!types.length) continue;
+    m += `<div class="pal-group"><div class="eyebrow">${cat}</div><div class="pal-grid">` +
+      types.map(t => `<button class="pal-item" type="button" data-type="${t}" aria-pressed="${tool === 'place' && placeType === t}">${iconSVG(t)}<span>${DEFS[t].name}</span></button>`).join('') +
+      '</div></div>';
+  }
+  $('#palette').innerHTML = m || `<p class="empty">「${esc(q)}」に一致する部品はありません。</p>`;
+}
+function syncPalettePressed() { document.querySelectorAll('.pal-item').forEach(b => b.setAttribute('aria-pressed', String(tool === 'place' && placeType === b.dataset.type))); }
+
+function applyView() {
+  viewportG.setAttribute('transform', `translate(${f(view.x)} ${f(view.y)}) scale(${view.k})`);
+  const g = G * view.k;
+  if (showGrid && g >= 7) {
+    stage.classList.remove('nogrid');
+    stage.style.backgroundSize = `${g}px ${g}px`;
+    stage.style.backgroundPosition = `${view.x - g / 2}px ${view.y - g / 2}px`;
+  } else stage.classList.add('nogrid');
+  $('#zoom-label').textContent = Math.round(view.k * 100) + '%';
+  renderOverlay();
+}
+function zoomAt(sx, sy, factor) {
+  const nk = Math.min(5, Math.max(0.2, view.k * factor));
+  view.x = sx - (sx - view.x) * nk / view.k; view.y = sy - (sy - view.y) * nk / view.k; view.k = nk; applyView();
+}
+function zoomCenter(factor) { const r = svg.getBoundingClientRect(); zoomAt(r.width / 2, r.height / 2, factor); }
+function measureBBox() {
+  measure.innerHTML = renderContent(false);
+  const g = measure.firstElementChild; if (!g) return null;
+  const b = g.getBBox();
+  return (b.width || b.height) ? b : null;
+}
+function fit() {
+  const r = svg.getBoundingClientRect(), bb = measureBBox();
+  if (!bb || r.width < 20) { view = { x: r.width / 2, y: r.height / 2, k: 1 }; applyView(); return; }
+  const pad = Math.min(80, r.width * 0.08), usableH = r.height - 120;
+  const k = Math.min(2, Math.max(0.2, Math.min((r.width - pad * 2) / bb.width, (usableH - pad) / bb.height)));
+  view.k = k; view.x = r.width / 2 - (bb.x + bb.width / 2) * k; view.y = 56 + (usableH) / 2 - (bb.y + bb.height / 2) * k;
+  applyView();
+}
+
+/* ================= history & storage ================= */
+let persistTimer = 0;
+function persistSoon() { clearTimeout(persistTimer); persistTimer = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(doc)); } catch (e) {} }, 250); }
+function pruneSel() { for (const id of [...sel]) if (!findComp(id) && !findWire(id) && !findText(id)) sel.delete(id); }
+function updateUndo() { $('#btn-undo').disabled = hi <= 0; $('#btn-redo').disabled = hi >= hist.length - 1; }
+function commit(opts = {}) {
+  const sj = JSON.stringify(doc);
+  if (hist[hi] !== sj) { hist = hist.slice(0, hi + 1); hist.push(sj); if (hist.length > 300) hist.shift(); hi = hist.length - 1; persistSoon(); }
+  pruneSel(); renderCanvas();
+  if (opts.props !== false) renderProps();
+  updateUndo();
+}
+function restore(i) { hi = i; doc = JSON.parse(hist[hi]); pruneSel(); renderCanvas(); renderProps(); renderPalette(); syncTitle(); updateUndo(); persistSoon(); }
+const undo = () => { if (draft) { draft = null; renderOverlay(); updateHint(); return; } if (hi > 0) restore(hi - 1); };
+const redo = () => { if (hi < hist.length - 1) restore(hi + 1); };
+
+/* ================= editing actions ================= */
+function nextLabel(prefix) {
+  if (!prefix) return '';
+  const re = new RegExp('^' + prefix + '(\\d+)$'); let max = 0;
+  for (const c of doc.comps) { const m = String(c.label).match(re); if (m) max = Math.max(max, +m[1]); }
+  return prefix + (max + 1);
+}
+function placeAt(p) {
+  const d = DEFS[placeType]; if (!d) return;
+  doc.comps.push({ id: uid(), type: placeType, x: p[0], y: p[1], rot: ghost.rot, flip: ghost.flip, label: nextLabel(d.prefix), value: d.value, sym: d.sym, pol: d.pol, lp: 'auto', lo: null });
+  commit();
+}
+function wireClick(p) {
+  if (!draft) { draft = { pts: [p] }; renderOverlay(); updateHint(); return; }
+  const last = draft.pts[draft.pts.length - 1];
+  draft.pts.push(...routeTo(last, p));
+  if (isConn(p) && !near(p, draft.pts[0])) finishWire();
+  else { renderOverlay(); updateHint(); }
+}
+function finishWire() {
+  if (!draft) return;
+  const pts = cleanup(draft.pts); draft = null;
+  if (pts.length >= 2) { doc.wires.push({ id: uid(), pts }); commit(); }
+  else renderOverlay();
+  updateHint();
+}
+function addText(w) {
+  const t = { id: uid(), x: Math.round(w[0] / 10) * 10, y: Math.round(w[1] / 10) * 10, text: 'テキスト', size: doc.settings.fs };
+  doc.texts.push(t); sel = new Set([t.id]); setTool('select'); commit();
+  openRight();
+  const el = $('#p-text'); if (el) { el.focus(); el.select(); }
+}
+function selectionBox() {
+  const pts = [];
+  for (const c of doc.comps) if (sel.has(c.id)) { const b = hitBoxOf(c); pts.push([b.x1, b.y1], [b.x2, b.y2]); }
+  for (const w of doc.wires) if (sel.has(w.id)) pts.push(...w.pts);
+  for (const t of doc.texts) if (sel.has(t.id)) pts.push([t.x, t.y]);
+  return pts.length ? boxOf(pts) : null;
+}
+const selCompIds = () => new Set(doc.comps.filter(c => sel.has(c.id)).map(c => c.id));
+function rotateSel() {
+  if (tool === 'place') { ghost.rot = (ghost.rot + 1) % 4; renderOverlay(); return; }
+  if (!sel.size) return;
+  const orig = clone(doc);
+  const comps = doc.comps.filter(c => sel.has(c.id)), wires = doc.wires.filter(w => sel.has(w.id)), texts = doc.texts.filter(t => sel.has(t.id));
+  let cx, cy;
+  if (comps.length === 1 && !wires.length && !texts.length) { cx = comps[0].x; cy = comps[0].y; }
+  else { const b = selectionBox(); cx = snap((b.x1 + b.x2) / 2); cy = snap((b.y1 + b.y2) / 2); }
+  const R = (x, y) => [cx - (y - cy), cy + (x - cx)];
+  for (const c of comps) { [c.x, c.y] = R(c.x, c.y); c.rot = (c.rot + 1) % 4; }
+  for (const w of wires) w.pts = w.pts.map(p => R(p[0], p[1]));
+  for (const t of texts) [t.x, t.y] = R(t.x, t.y);
+  fixAttachments(orig, doc, selCompIds()); commit();
+}
+function flipSel() {
+  if (tool === 'place') { ghost.flip = !ghost.flip; renderOverlay(); return; }
+  const orig = clone(doc); let any = false;
+  for (const c of doc.comps) if (sel.has(c.id)) { c.flip = !c.flip; any = true; }
+  if (!any) return;
+  fixAttachments(orig, doc, selCompIds()); commit();
+}
+function deleteSel() {
+  if (!sel.size) return;
+  doc.comps = doc.comps.filter(c => !sel.has(c.id)); doc.wires = doc.wires.filter(w => !sel.has(w.id)); doc.texts = doc.texts.filter(t => !sel.has(t.id));
+  sel.clear(); commit();
+}
+function copySel() {
+  if (!sel.size) return false;
+  clip = { comps: clone(doc.comps.filter(c => sel.has(c.id))), wires: clone(doc.wires.filter(w => sel.has(w.id))), texts: clone(doc.texts.filter(t => sel.has(t.id))) };
+  pasteN = 0; return true;
+}
+function paste() {
+  if (!clip) return;
+  pasteN++; const o = G * 2 * pasteN; const ns = new Set();
+  for (const c0 of clip.comps) {
+    const c = { ...clone(c0), id: uid(), x: c0.x + o, y: c0.y + o };
+    const pre = DEFS[c.type].prefix;
+    if (pre && new RegExp('^' + pre + '\\d+$').test(c.label)) c.label = nextLabel(pre);
+    doc.comps.push(c); ns.add(c.id);
+  }
+  for (const w0 of clip.wires) { const w = { id: uid(), pts: w0.pts.map(p => [p[0] + o, p[1] + o]) }; doc.wires.push(w); ns.add(w.id); }
+  for (const t0 of clip.texts) { const t = { ...clone(t0), id: uid(), x: t0.x + o, y: t0.y + o }; doc.texts.push(t); ns.add(t.id); }
+  sel = ns; commit();
+}
+function selectAll() { sel = new Set([...doc.comps, ...doc.wires, ...doc.texts].map(x => x.id)); renderOverlay(); renderProps(); }
+
+/* ================= tools ================= */
+function setTool(t, type) {
+  if (draft && t !== 'wire') finishWire();
+  tool = t; placeType = t === 'place' ? type : null;
+  hover = null;
+  document.querySelectorAll('.tbtn[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
+  syncPalettePressed();
+  svg.style.cursor = t === 'select' ? 'default' : 'crosshair';
+  renderOverlay(); updateHint();
+}
+function updateHint() {
+  let h;
+  if (tool === 'place') h = `クリックで<b>${DEFS[placeType].name}</b>を配置 · R 回転 · F 反転 · Esc で終了`;
+  else if (tool === 'wire') h = draft ? 'クリックで折り曲げ · 端子や線に当てると完了 · ダブルクリック / Enter で終了' : '端子をクリックして<b>配線</b>を始めます';
+  else if (tool === 'text') h = 'クリックした位置に<b>文字</b>を置きます';
+  else if (sel.size === 1 && findWire([...sel][0])) h = '線分をドラッグして平行移動 · 角の四角をドラッグして形を調整';
+  else if (sel.size) h = 'ドラッグで移動 · R 回転 · F 反転 · Delete で削除 · ラベルもドラッグで動かせます';
+  else h = '左の一覧から部品を選んで配置 · W で配線 · ドラッグで範囲選択';
+  $('#hint').innerHTML = h;
+  $('#btn-finish').hidden = !(tool === 'wire' && draft);
+}
+
+/* ================= pointer input ================= */
+const isNarrow = () => window.matchMedia('(max-width:900px)').matches;
+function closeDrawers() { const a = $('#side-left').classList.contains('open') || $('#side-right').classList.contains('open'); $('#side-left').classList.remove('open'); $('#side-right').classList.remove('open'); return a; }
+function openRight() { if (isNarrow()) $('#side-right').classList.add('open'); }
+function toWorld(e) { const r = svg.getBoundingClientRect(); return [(e.clientX - r.left - view.x) / view.k, (e.clientY - r.top - view.y) / view.k]; }
+function hitTest(w, target) {
+  const tEl = target && target.closest && target.closest('[data-t]');
+  if (tEl) return { kind: 'text', id: tEl.dataset.t };
+  const tol = 6 / view.k;
+  for (let i = doc.comps.length - 1; i >= 0; i--) if (inBox(w, bboxOf(doc.comps[i]), 3 / view.k)) return { kind: 'comp', id: doc.comps[i].id };
+  let best = null, bd = tol;
+  for (const wi of doc.wires) for (let i = 0; i < wi.pts.length - 1; i++) { const d = distSeg(w, wi.pts[i], wi.pts[i + 1]); if (d < bd) { bd = d; best = { kind: 'wire', id: wi.id, seg: i }; } }
+  if (best) return best;
+  for (let i = doc.comps.length - 1; i >= 0; i--) if (inBox(w, hitBoxOf(doc.comps[i]), tol)) return { kind: 'comp', id: doc.comps[i].id };
+  return null;
+}
+function startPan(e) { drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y }; svg.style.cursor = 'grabbing'; }
+
+svg.addEventListener('pointerdown', e => {
+  const ae = document.activeElement; if (ae && ae !== document.body && ae.blur) ae.blur();
+  if (isNarrow() && closeDrawers()) return;
+  try { svg.setPointerCapture(e.pointerId); } catch (_) {}
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()];
+    if (drag && drag.orig) { doc = drag.orig; renderCanvas(); }
+    drag = null;
+    pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, v: { ...view } };
+    return;
+  }
+  if (pointers.size > 2) return;
+  const w = toWorld(e), sp = [snap(w[0]), snap(w[1])];
+  cursor = sp;
+  if (e.button === 1 || (e.button === 0 && spaceDown)) { e.preventDefault(); startPan(e); return; }
+  if (e.button === 2) { if (tool === 'wire' && draft) finishWire(); else if (tool !== 'select') setTool('select'); return; }
+  if (tool === 'place') { placeAt(sp); return; }
+  if (tool === 'wire') { wireClick(sp); return; }
+  if (tool === 'text') { addText(w); return; }
+
+  const hEl = e.target.closest && e.target.closest('[data-handle]');
+  if (hEl) { const [wid, idx] = hEl.dataset.handle.split(':'); drag = { kind: 'vertex', wid, idx: +idx, orig: clone(doc), start: w, moved: false }; return; }
+  const labEl = e.target.closest && e.target.closest('[data-lab]');
+  if (labEl) {
+    const id = labEl.dataset.lab;
+    if (!sel.has(id)) { sel = new Set([id]); renderProps(); }
+    drag = { kind: 'label', id, orig: clone(doc), start: w, moved: false }; renderOverlay(); updateHint(); return;
+  }
+  const hit = hitTest(w, e.target);
+  if (hit) {
+    if (e.shiftKey) { sel.has(hit.id) ? sel.delete(hit.id) : sel.add(hit.id); renderOverlay(); renderProps(); updateHint(); return; }
+    const wasSel = sel.has(hit.id);
+    if (!wasSel) { sel = new Set([hit.id]); renderProps(); }
+    drag = (hit.kind === 'wire' && sel.size === 1)
+      ? { kind: 'segment', wid: hit.id, seg: hit.seg, orig: clone(doc), start: w, moved: false }
+      : { kind: 'move', orig: clone(doc), start: w, moved: false, clickId: hit.id, wasSel };
+    renderOverlay(); updateHint(); return;
+  }
+  if (e.pointerType === 'touch') { startPan(e); return; }
+  if (!e.shiftKey && sel.size) { sel.clear(); renderProps(); }
+  drag = { kind: 'band', start: w, cur: w, base: new Set(sel) };
+  renderOverlay(); updateHint();
+});
+
+svg.addEventListener('pointermove', e => {
+  if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pinch) {
+    if (pointers.size < 2) return;
+    const [a, b] = [...pointers.values()], r = svg.getBoundingClientRect();
+    const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2, v = pinch.v;
+    const k = Math.min(5, Math.max(0.2, v.k * d / pinch.d));
+    const wx = (pinch.mx - r.left - v.x) / v.k, wy = (pinch.my - r.top - v.y) / v.k;
+    view = { k, x: mx - r.left - wx * k, y: my - r.top - wy * k }; applyView(); return;
+  }
+  const w = toWorld(e);
+  cursor = [snap(w[0]), snap(w[1])];
+  if (drag) {
+    if (drag.kind === 'pan') { view.x = drag.vx + e.clientX - drag.sx; view.y = drag.vy + e.clientY - drag.sy; applyView(); return; }
+    if (drag.kind === 'band') {
+      drag.cur = w; const r = boxOf([drag.start, w]); const inside = b => b.x1 >= r.x1 && b.x2 <= r.x2 && b.y1 >= r.y1 && b.y2 <= r.y2;
+      sel = new Set(drag.base);
+      for (const c of doc.comps) if (inside(hitBoxOf(c))) sel.add(c.id);
+      for (const wi of doc.wires) if (inside(boxOf(wi.pts))) sel.add(wi.id);
+      for (const t of doc.texts) if (inBox([t.x, t.y], r)) sel.add(t.id);
+      renderOverlay(); return;
+    }
+    if (drag.kind === 'label') {
+      const dx = Math.round(w[0] - drag.start[0]), dy = Math.round(w[1] - drag.start[1]);
+      if (!drag.moved && Math.hypot(dx, dy) < 3) return;
+      drag.moved = true; doc = clone(drag.orig);
+      const c = findComp(drag.id); const lo = c.lo || [0, 0]; c.lo = [lo[0] + dx, lo[1] + dy];
+      renderCanvas(); return;
+    }
+    const dx = snap(w[0] - drag.start[0]), dy = snap(w[1] - drag.start[1]);
+    if (!drag.moved && !dx && !dy) return;
+    drag.moved = true; doc = clone(drag.orig);
+    if (drag.kind === 'move') {
+      for (const c of doc.comps) if (sel.has(c.id)) { c.x += dx; c.y += dy; }
+      for (const t of doc.texts) if (sel.has(t.id)) { t.x += dx; t.y += dy; }
+      for (const wi of doc.wires) if (sel.has(wi.id)) wi.pts = wi.pts.map(p => [p[0] + dx, p[1] + dy]);
+      fixAttachments(drag.orig, doc, selCompIds());
+    } else if (drag.kind === 'segment') {
+      const o = drag.orig.wires.find(x => x.id === drag.wid); findWire(drag.wid).pts = moveSegment(o.pts, drag.seg, dx, dy);
+    } else if (drag.kind === 'vertex') {
+      const o = drag.orig.wires.find(x => x.id === drag.wid), p = o.pts[drag.idx];
+      findWire(drag.wid).pts = dragVertex(o.pts, drag.idx, [p[0] + dx, p[1] + dy]);
+    }
+    renderCanvas(); return;
+  }
+  if (tool === 'select') {
+    const h = hitTest(w, e.target), hid = h ? h.id : null;
+    const onLab = e.target.closest && e.target.closest('[data-lab],[data-handle]');
+    svg.style.cursor = (h || onLab) ? 'move' : (spaceDown ? 'grab' : 'default');
+    if (hid !== hover) { hover = hid; renderOverlay(); }
+  } else renderOverlay();
+});
+
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pinch) { if (pointers.size < 2) pinch = null; return; }
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (d.kind === 'pan') { svg.style.cursor = tool === 'select' ? (spaceDown ? 'grab' : 'default') : 'crosshair'; return; }
+  if (d.kind === 'band') { renderOverlay(); renderProps(); updateHint(); return; }
+  if (d.moved) {
+    for (const w of doc.wires) w.pts = cleanup(w.pts);
+    doc.wires = doc.wires.filter(w => w.pts.length >= 2);
+    commit();
+  } else if (d.kind === 'move' && d.wasSel && sel.size > 1) { sel = new Set([d.clickId]); renderOverlay(); renderProps(); }
+  updateHint();
+}
+svg.addEventListener('pointerup', endPointer);
+svg.addEventListener('pointercancel', endPointer);
+svg.addEventListener('pointerleave', () => { if (!drag && pointers.size === 0) { cursor = null; if (hover) hover = null; renderOverlay(); } });
+svg.addEventListener('contextmenu', e => e.preventDefault());
+svg.addEventListener('dblclick', e => {
+  if (tool === 'wire') { finishWire(); return; }
+  if (tool !== 'select') return;
+  const lab = e.target.closest && e.target.closest('[data-lab]');
+  const h = lab ? { kind: 'comp', id: lab.dataset.lab } : hitTest(toWorld(e), e.target);
+  if (!h) return;
+  sel = new Set([h.id]); renderProps(); renderOverlay(); openRight();
+  const el = h.kind === 'text' ? $('#p-text') : lab ? $('#p-label') : ($('#p-value') || $('#p-label'));
+  if (el) { el.focus(); el.select(); }
+});
+svg.addEventListener('wheel', e => {
+  e.preventDefault();
+  const m = e.deltaMode === 1 ? 16 : 1, r = svg.getBoundingClientRect();
+  if (e.ctrlKey || e.metaKey) zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * m * 0.01));
+  else { view.x -= e.deltaX * m; view.y -= e.deltaY * m; applyView(); }
+}, { passive: false });
+
+/* ================= keyboard ================= */
+window.addEventListener('keydown', e => {
+  const ae = document.activeElement;
+  const typing = ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable);
+  if (e.key === 'Escape') {
+    if (!$('#export-modal').hidden) { closeExport(); return; }
+    if (!$('#confirm-modal').hidden) { $('#confirm-modal').hidden = true; return; }
+    if (typing) { ae.blur(); return; }
+    if (tool === 'wire' && draft) finishWire();
+    else if (tool !== 'select') setTool('select');
+    else if (sel.size) { sel.clear(); renderOverlay(); renderProps(); updateHint(); }
+    return;
+  }
+  if (typing) {
+    if (e.key === 'Enter' && ae.id === 'part-search') { const first = $('.pal-item'); if (first) { first.click(); ae.blur(); } }
+    return;
+  }
+  if (!$('#export-modal').hidden || !$('#confirm-modal').hidden) return;
+  const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
+  if (mod) {
+    if (k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+    else if (k === 'y') { e.preventDefault(); redo(); }
+    else if (k === 'c') { if (copySel()) toast(`${sel.size} 個の要素をコピーしました`); }
+    else if (k === 'x') { if (copySel()) deleteSel(); }
+    else if (k === 'v') { e.preventDefault(); paste(); }
+    else if (k === 'd') { e.preventDefault(); if (copySel()) paste(); }
+    else if (k === 'a') { e.preventDefault(); selectAll(); }
+    else if (k === 's') { e.preventDefault(); saveJSON(); }
+    else if (k === 'e') { e.preventDefault(); openExport(); }
+    return;
+  }
+  if (e.key === ' ') { e.preventDefault(); if (!spaceDown) { spaceDown = true; if (!drag) svg.style.cursor = 'grab'; } return; }
+  if (k === 'v') setTool('select');
+  else if (k === 'w') setTool('wire');
+  else if (k === 't') setTool('text');
+  else if (k === 'r') rotateSel();
+  else if (k === 'f') flipSel();
+  else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSel(); }
+  else if (e.key === 'Enter') { if (draft) finishWire(); }
+  else if (e.key === '/') { e.preventDefault(); if (isNarrow()) $('#side-left').classList.add('open'); $('#part-search').focus(); }
+  else if (e.key === '+' || e.key === '=') zoomCenter(1.2);
+  else if (e.key === '-') zoomCenter(1 / 1.2);
+  else if (e.key === '0') fit();
+  else if (e.key.startsWith('Arrow') && sel.size) {
+    e.preventDefault();
+    const dx = e.key === 'ArrowLeft' ? -G : e.key === 'ArrowRight' ? G : 0, dy = e.key === 'ArrowUp' ? -G : e.key === 'ArrowDown' ? G : 0;
+    const orig = clone(doc);
+    for (const c of doc.comps) if (sel.has(c.id)) { c.x += dx; c.y += dy; }
+    for (const t of doc.texts) if (sel.has(t.id)) { t.x += dx; t.y += dy; }
+    for (const w of doc.wires) if (sel.has(w.id)) w.pts = w.pts.map(p => [p[0] + dx, p[1] + dy]);
+    fixAttachments(orig, doc, selCompIds()); commit();
+  }
+});
+window.addEventListener('keyup', e => { if (e.key === ' ') { spaceDown = false; if (!drag) svg.style.cursor = tool === 'select' ? 'default' : 'crosshair'; } });
+window.addEventListener('blur', () => { spaceDown = false; });
+
+/* ================= properties panel ================= */
+const seg = (scope, key, opts, cur) => `<div class="seg" role="group" data-scope="${scope}" data-key="${key}">` +
+  opts.map(([v, l]) => `<button type="button" class="seg-btn" data-val="${v}" aria-pressed="${String(cur) === String(v)}">${l}</button>`).join('') + '</div>';
+const field = (id, label, value, extra = '') => `<label class="field"><span>${label}</span><input id="${id}" value="${esc(value)}" autocomplete="off" spellcheck="false">${extra}</label>`;
+
+function renderProps() {
+  const P = $('#props'), ids = [...sel];
+  if (ids.length === 1) {
+    const c = findComp(ids[0]); if (c) { P.innerHTML = compPanel(c); return; }
+    const t = findText(ids[0]); if (t) { P.innerHTML = textPanel(t); return; }
+    const w = findWire(ids[0]); if (w) { P.innerHTML = wirePanel(w); return; }
+  }
+  if (ids.length > 1) { P.innerHTML = multiPanel(ids.length); return; }
+  P.innerHTML = settingsPanel();
+}
+function compPanel(c) {
+  const d = DEFS[c.type];
+  const units = d.units.length ? `<div class="chips">${d.units.map(u => `<button type="button" class="chip" data-unit="${u}">${u}</button>`).join('')}</div>` : '';
+  let m = `<section class="pgroup"><div class="eyebrow">部品</div><h2>${d.name}</h2>
+    ${field('p-label', '記号', c.label, '<small>R1 のように英字＋数字にすると数字が下付きになります。_ の後ろも下付きです (例: V_out)。</small>')}
+    ${field('p-value', d.inner ? '表示する名前' : '値', c.value)}${units}`;
+  if (d.meter) m += `${field('p-sym', '計器の文字', c.sym || '')}<label class="check"><input type="checkbox" id="p-pol"${c.pol ? ' checked' : ''}>＋端子の印を付ける</label>`;
+  m += `</section>
+  <section class="pgroup"><div class="eyebrow">向き</div><div class="row">
+    <button class="btn pill sm" type="button" data-act="rotate">回転 R</button>
+    <button class="btn pill sm" type="button" data-act="flip">反転 F</button></div></section>
+  <section class="pgroup"><div class="eyebrow">ラベルの位置</div>
+    ${seg('c', 'lp', [['auto', '自動'], ['top', '上'], ['bottom', '下'], ['left', '左'], ['right', '右']], c.lp || 'auto')}
+    ${c.lo ? '<div class="row"><button class="btn ghost sm" type="button" data-act="lreset">ドラッグした位置を元に戻す</button></div>' : '<p class="note">キャンバス上でラベルを直接ドラッグして微調整もできます。</p>'}
+  </section>
+  <section class="pgroup"><div class="row">
+    <button class="btn pill sm" type="button" data-act="dup">複製</button>
+    <button class="btn pill sm" type="button" data-act="delete">削除</button></div></section>`;
+  return m;
+}
+function textPanel(t) {
+  return `<section class="pgroup"><div class="eyebrow">文字</div><h2>テキスト</h2>
+    ${field('p-text', '内容', t.text, '<small>_ の後ろは下付きになります (例: I_1, V_{CE})。</small>')}
+    <div class="field"><span>大きさ</span>${seg('t', 'size', [[12, '12'], [14, '14'], [16, '16'], [20, '20'], [24, '24']], t.size)}</div></section>
+    <section class="pgroup"><div class="row"><button class="btn pill sm" type="button" data-act="dup">複製</button><button class="btn pill sm" type="button" data-act="delete">削除</button></div></section>`;
+}
+function wirePanel() {
+  return `<section class="pgroup"><div class="eyebrow">配線</div><h2>導線</h2>
+    <p class="note">線分をドラッグすると平行に移動し、両端の接続は保たれます。角や端点の四角をドラッグすると折れ曲がりを調整できます。</p></section>
+    <section class="pgroup"><div class="row"><button class="btn pill sm" type="button" data-act="delete">削除</button></div></section>`;
+}
+function multiPanel(n) {
+  return `<section class="pgroup"><div class="eyebrow">選択中</div><h2>${n} 個の要素</h2>
+    <p class="note">まとめてドラッグで移動できます。回転は選択範囲の中心を軸にします。</p>
+    <div class="row"><button class="btn pill sm" type="button" data-act="rotate">回転 R</button><button class="btn pill sm" type="button" data-act="flip">反転 F</button>
+    <button class="btn pill sm" type="button" data-act="dup">複製</button><button class="btn pill sm" type="button" data-act="delete">削除</button></div></section>`;
+}
+function settingsPanel() {
+  const s = doc.settings, mod = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
+  const kb = (keys, desc) => `<dt>${keys.map(k => `<kbd class="k">${k}</kbd>`).join(' ')}</dt><dd>${desc}</dd>`;
+  return `<section class="pgroup only-narrow"><div class="eyebrow">ファイル</div>
+      ${field('s-title', '図の名前', doc.title)}
+      <div class="row"><button class="btn pill sm" type="button" data-act="new">新規</button><button class="btn pill sm" type="button" data-act="open">開く</button><button class="btn pill sm" type="button" data-act="save">保存</button></div></section>
+    <section class="pgroup"><div class="eyebrow">図の設定</div><h2>表示スタイル</h2>
+      <div class="field"><span>抵抗の図記号</span>${seg('s', 'std', [['jis', 'JIS (長方形)'], ['ansi', 'ジグザグ']], s.std)}</div>
+      <div class="field"><span>線の太さ</span>${seg('s', 'sw', [[1.2, '細い'], [1.6, '標準'], [2.2, '太い']], s.sw)}</div>
+      <div class="field"><span>文字の書体</span>${seg('s', 'font', [['sans', 'ゴシック'], ['serif', '明朝 (Times)']], s.font)}</div>
+      <div class="field"><span>文字の大きさ</span>${seg('s', 'fs', [[12, '12'], [14, '14'], [16, '16'], [18, '18']], s.fs)}</div>
+      <label class="check"><input type="checkbox" id="s-sub"${s.sub ? ' checked' : ''}>記号の番号を下付きにする (R1 → R₁)</label>
+      <label class="check"><input type="checkbox" id="s-ital"${s.ital ? ' checked' : ''}>記号を斜体にする</label>
+      <label class="check"><input type="checkbox" id="s-grid"${showGrid ? ' checked' : ''}>方眼を表示する</label>
+    </section>
+    <section class="pgroup"><div class="eyebrow">ショートカット</div>
+      <dl class="keys">
+        ${kb(['V'], '選択')}${kb(['W'], '配線')}${kb(['T'], '文字')}
+        ${kb(['R'], '回転')}${kb(['F'], '反転')}${kb(['Delete'], '削除')}
+        ${kb(['↑↓←→'], '1 マス移動')}
+        ${kb([mod, 'Z'], '元に戻す')}${kb([mod, 'D'], '複製')}${kb([mod, 'C', '/', 'V'], 'コピー・貼り付け')}
+        ${kb([mod, 'E'], '書き出し')}${kb(['Space'], '押しながらドラッグで画面移動')}
+        ${kb([mod, 'ホイール'], 'ズーム')}${kb(['0'], '全体を表示')}${kb(['/'], '部品を検索')}
+      </dl></section>`;
+}
+
+const props = $('#props');
+function applyUnit(v, u) {
+  const m = String(v).trim().match(/^([-+]?[\d.,]+(?:[eE][-+]?\d+)?)/);
+  return m ? `${m[1]} ${u}` : (String(v).trim() ? `${String(v).trim()} ${u}` : u);
+}
+props.addEventListener('input', e => {
+  const el = e.target, id = el.id, one = [...sel][0];
+  if (id === 's-title') { doc.title = el.value; syncTitle(); persistSoon(); return; }
+  const c = findComp(one), t = findText(one);
+  if (c && id === 'p-label') c.label = el.value;
+  else if (c && id === 'p-value') c.value = el.value;
+  else if (c && id === 'p-sym') c.sym = el.value;
+  else if (t && id === 'p-text') t.text = el.value;
+  else return;
+  renderCanvas(); persistSoon();
+});
+props.addEventListener('change', e => {
+  const el = e.target, id = el.id;
+  if (id === 's-sub') { doc.settings.sub = el.checked; commit({ props: false }); return; }
+  if (id === 's-ital') { doc.settings.ital = el.checked; commit({ props: false }); return; }
+  if (id === 's-grid') { showGrid = el.checked; applyView(); return; }
+  if (id === 'p-pol') { const c = findComp([...sel][0]); if (c) { c.pol = el.checked; commit({ props: false }); } return; }
+  if (/^(p-|s-title)/.test(id)) commit({ props: false });
+});
+props.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') e.target.blur(); });
+props.addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const one = [...sel][0];
+  if (b.classList.contains('seg-btn')) {
+    const g = b.parentElement, key = g.dataset.key, scope = g.dataset.scope, raw = b.dataset.val;
+    const val = isNaN(+raw) ? raw : +raw;
+    if (scope === 's') { doc.settings[key] = val; if (key === 'std') renderPalette(); commit(); }
+    else if (scope === 'c') { const c = findComp(one); if (c) { c[key] = val; c.lo = null; commit(); } }
+    else if (scope === 't') { const t = findText(one); if (t) { t[key] = val; commit(); } }
+    return;
+  }
+  if (b.dataset.unit) { const c = findComp(one); if (c) { c.value = applyUnit(c.value, b.dataset.unit); $('#p-value').value = c.value; commit({ props: false }); } return; }
+  switch (b.dataset.act) {
+    case 'rotate': rotateSel(); break;
+    case 'flip': flipSel(); break;
+    case 'delete': deleteSel(); break;
+    case 'dup': if (copySel()) paste(); break;
+    case 'lreset': { const c = findComp(one); if (c) { c.lo = null; commit(); } break; }
+    case 'new': askNew(); break;
+    case 'open': $('#file-input').click(); break;
+    case 'save': saveJSON(); break;
+  }
+});
+
+/* ================= files, export ================= */
+const dlReady = (window.claude && typeof window.claude.use === 'function') ? Promise.resolve(window.claude.use('downloads')).catch(() => null) : Promise.resolve(null);
+const fileBase = () => (doc.title.trim() || '回路図').replace(/[\\/:*?"<>|\n\r]+/g, '_').slice(0, 80);
+async function saveFile(name, data) {
+  const dl = await dlReady;
+  if (dl) {
+    try { await dl.save({ filename: name, data }); toast(`${name} を保存しました`); }
+    catch (err) { const code = err && err.code; if (code === 'declined') return; toast(code === 'rate_limited' ? '保存の確認が開いています。少し待ってから再度お試しください' : '保存できませんでした。画像のコピーをお試しください'); }
+    return;
+  }
+  const blob = data instanceof Blob ? data : new Blob([data], { type: 'application/octet-stream' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+function saveJSON() { saveFile(fileBase() + '.json', JSON.stringify(doc, null, 1)); }
+$('#file-input').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+  try {
+    const o = JSON.parse(await file.text());
+    if (!o || !Array.isArray(o.comps) || !Array.isArray(o.wires)) throw new Error('shape');
+    doc = normalize(o); sel.clear(); draft = null; setTool('select'); commit(); renderPalette(); syncTitle(); requestAnimationFrame(fit);
+    toast(`${file.name} を開きました`);
+  } catch (_) { toast('回路図ノートで保存した .json ファイルを選んでください'); }
+});
+
+function buildSVG(scale) {
+  const bb = measureBBox(); if (!bb) return null;
+  const m = EX.margin, sw = doc.settings.sw;
+  const x = Math.floor(bb.x - m - sw), y = Math.floor(bb.y - m - sw), w = Math.ceil(bb.width + 2 * (m + sw)), h = Math.ceil(bb.height + 2 * (m + sw));
+  const bg = EX.bg === 'white' ? `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#ffffff"/>` : '';
+  return { w, h, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${w * scale}" height="${h * scale}" viewBox="${x} ${y} ${w} ${h}">${bg}${renderContent(false)}</svg>` };
+}
+const svgURL = s => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s);
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(bytes) { let c = 0xffffffff; for (const b of bytes) c = CRC[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+/* Write a pHYs chunk so Word places a 2× image at its intended physical size. */
+async function withDPI(blob, dpi) {
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  const type = String.fromCharCode(...buf.slice(37, 41));
+  if (type === 'pHYs') return blob;
+  const ppm = Math.round(dpi / 0.0254), chunk = new Uint8Array(21), dv = new DataView(chunk.buffer);
+  dv.setUint32(0, 9); chunk.set([0x70, 0x48, 0x59, 0x73], 4); dv.setUint32(8, ppm); dv.setUint32(12, ppm); chunk[16] = 1;
+  dv.setUint32(17, crc32(chunk.slice(4, 17)));
+  const out = new Uint8Array(buf.length + 21); out.set(buf.slice(0, 33)); out.set(chunk, 33); out.set(buf.slice(33), 54);
+  return new Blob([out], { type: 'image/png' });
+}
+async function pngBlob() {
+  const r = buildSVG(EX.scale); if (!r) throw new Error('empty');
+  const img = new Image(); img.src = svgURL(r.svg); await img.decode();
+  const cv = document.createElement('canvas'); cv.width = r.w * EX.scale; cv.height = r.h * EX.scale;
+  cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+  const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+  return withDPI(blob, 96 * EX.scale);
+}
+const EX_OPTS = { bg: [['white', '白'], ['clear', '透明']], scale: [[1, '1×'], [2, '2×'], [3, '3×'], [4, '4×']], margin: [[8, '狭い'], [20, '標準'], [40, '広い']] };
+function renderExport() {
+  document.querySelectorAll('[data-ex]').forEach(g => { const k = g.dataset.ex; g.innerHTML = EX_OPTS[k].map(([v, l]) => `<button type="button" class="seg-btn" data-val="${v}" aria-pressed="${String(EX[k]) === String(v)}">${l}</button>`).join(''); });
+  const r = buildSVG(1);
+  $('#ex-preview').classList.toggle('clear', EX.bg === 'clear');
+  if (!r) { $('#ex-img').removeAttribute('src'); $('#ex-size').textContent = '回路図が空です。部品を配置してから書き出してください。'; return; }
+  $('#ex-img').src = svgURL(r.svg);
+  const mm = v => Math.round(v / 96 * 25.4);
+  $('#ex-size').textContent = `PNG ${r.w * EX.scale} × ${r.h * EX.scale} px ・ Word 上で約 ${mm(r.w)} × ${mm(r.h)} mm`;
+}
+function openExport() { if (draft) finishWire(); renderExport(); $('#export-modal').hidden = false; $('#ex-png').focus(); }
+function closeExport() { $('#export-modal').hidden = true; }
+document.querySelector('.ex-opts').addEventListener('click', e => {
+  const b = e.target.closest('.seg-btn'); if (!b) return;
+  const k = b.parentElement.dataset.ex, raw = b.dataset.val; EX[k] = isNaN(+raw) ? raw : +raw; renderExport();
+});
+$('#ex-close').addEventListener('click', closeExport);
+$('#export-modal').addEventListener('pointerdown', e => { if (e.target.id === 'export-modal') closeExport(); });
+$('#ex-png').addEventListener('click', async () => {
+  try { const b = await pngBlob(); saveFile(`${fileBase()}.png`, b); } catch (_) { toast('回路図が空です'); }
+});
+$('#ex-svg').addEventListener('click', () => { const r = buildSVG(1); if (!r) { toast('回路図が空です'); return; } saveFile(`${fileBase()}.svg`, `<?xml version="1.0" encoding="UTF-8"?>\n` + r.svg); });
+$('#ex-copy').addEventListener('click', () => {
+  if (!doc.comps.length && !doc.wires.length && !doc.texts.length) { toast('回路図が空です'); return; }
+  try {
+    if (!navigator.clipboard || typeof ClipboardItem === 'undefined') throw new Error('nosupport');
+    navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob() })])
+      .then(() => toast('画像をコピーしました。Word に貼り付けできます'), () => toast('この環境では画像をコピーできません。PNG で保存してください'));
+  } catch (_) { toast('この環境では画像をコピーできません。PNG で保存してください'); }
+});
+
+function askNew() { $('#confirm-modal').hidden = false; $('#cf-cancel').focus(); }
+$('#cf-cancel').addEventListener('click', () => { $('#confirm-modal').hidden = true; });
+$('#confirm-modal').addEventListener('pointerdown', e => { if (e.target.id === 'confirm-modal') $('#confirm-modal').hidden = true; });
+$('#cf-ok').addEventListener('click', () => {
+  $('#confirm-modal').hidden = true; doc = blankDoc(); sel.clear(); draft = null; setTool('select'); commit(); renderPalette(); syncTitle();
+  const r = svg.getBoundingClientRect(); view = { x: Math.round(r.width / 2 / G) * G, y: Math.round(r.height / 2 / G) * G, k: 1 }; applyView();
+  toast('新しい回路図を作成しました');
+});
+
+let toastTimer = 0;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2600); }
+
+/* ================= wiring UI ================= */
+function syncTitle() { const a = $('#doc-title'); if (document.activeElement !== a) a.value = doc.title; const b = $('#s-title'); if (b && document.activeElement !== b) b.value = doc.title; }
+$('#doc-title').addEventListener('input', e => { doc.title = e.target.value; syncTitle(); persistSoon(); });
+$('#doc-title').addEventListener('change', () => commit({ props: false }));
+$('#doc-title').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); });
+$('#part-search').addEventListener('input', renderPalette);
+$('#palette').addEventListener('click', e => {
+  const b = e.target.closest('.pal-item'); if (!b) return;
+  const t = b.dataset.type;
+  if (tool === 'place' && placeType === t) { setTool('select'); return; }
+  if (placeType !== t) ghost.flip = false;
+  setTool('place', t);
+  if (isNarrow()) $('#side-left').classList.remove('open');
+});
+document.querySelectorAll('.tbtn[data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+$('#btn-finish').addEventListener('click', finishWire);
+$('#btn-undo').addEventListener('click', undo);
+$('#btn-redo').addEventListener('click', redo);
+$('#btn-zin').addEventListener('click', () => zoomCenter(1.25));
+$('#btn-zout').addEventListener('click', () => zoomCenter(1 / 1.25));
+$('#zoom-label').addEventListener('click', () => zoomCenter(1 / view.k));
+$('#btn-fit').addEventListener('click', fit);
+$('#btn-new').addEventListener('click', askNew);
+$('#btn-open').addEventListener('click', () => $('#file-input').click());
+$('#btn-save').addEventListener('click', saveJSON);
+$('#btn-export').addEventListener('click', openExport);
+$('#btn-parts').addEventListener('click', () => { $('#side-right').classList.remove('open'); $('#side-left').classList.toggle('open'); });
+$('#btn-props').addEventListener('click', () => { $('#side-left').classList.remove('open'); $('#side-right').classList.toggle('open'); });
+window.addEventListener('resize', () => renderOverlay());
+
+/* ================= boot ================= */
+(function boot() {
+  let saved = null;
+  try { const raw = localStorage.getItem(STORE_KEY); if (raw) saved = JSON.parse(raw); } catch (_) {}
+  doc = saved && Array.isArray(saved.comps) ? normalize(saved) : sampleDoc();
+  hist = [JSON.stringify(doc)]; hi = 0;
+  syncTitle(); renderPalette(); renderCanvas(); renderProps(); updateUndo(); setTool('select');
+  requestAnimationFrame(() => requestAnimationFrame(fit));
+})();
+})();
+</script>
+
+</body>
+</html>
