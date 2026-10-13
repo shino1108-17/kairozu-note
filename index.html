@@ -3,15 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="description" content="実験レポート用の回路図をグリッド上で組み立て、PNG・SVG で書き出せるブラウザ上の回路図エディタ。">
+<meta name="description" content="実験レポート用の回路図をグリッド上で組み立て、シミュレーションして、PNG・SVG で書き出せるブラウザ上の回路図エディタ。">
 <title>回路図ノート</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 44 44'%3E%3Cpath d='M0 22H10M34 22H44' stroke='black' stroke-width='4'/%3E%3Crect x='10' y='14' width='24' height='16' stroke='black' stroke-width='4' fill='white'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+JP:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-/* Layout: lab-notebook workbench. Parts list left, paper-white drawing sheet in the middle, properties right.
-   Monochrome by design: black type and strokes on Paper, hairline structure, pill controls, one filled button (書き出し). */
+/* Layout: lab-notebook workbench. Parts list left, paper-white drawing sheet in the middle, properties / simulation right,
+   waveform panel slides up under the sheet. Monochrome by design: black type and strokes on Paper, hairline structure,
+   pill controls, one filled button (書き出し). Graph traces are told apart by dash pattern so they survive B/W printing. */
 :root{
   --obsidian:#000000;
   --graphite:#666666;
@@ -60,17 +61,20 @@ button,input,select{font:inherit;color:inherit}
 .btn.ghost:hover{background:var(--whisper)}
 .btn.pill{border-color:var(--hairline)}
 .btn.pill:hover{box-shadow:var(--shadow-sm);background:var(--paper)}
+.btn.pill.strong{border-color:var(--obsidian)}
 .btn.filled{background:var(--obsidian);color:var(--paper)}
 .btn.filled:hover{opacity:.82}
 .btn.sm{height:32px;padding:0 14px;font-size:13px}
+.btn[aria-pressed="true"]{background:var(--ash)}
 .btn:disabled{opacity:.35;cursor:default;box-shadow:none}
 .only-narrow{display:none!important}
 
 /* ---------- workspace ---------- */
-.work{display:grid;grid-template-columns:252px minmax(0,1fr) 280px;min-height:0;position:relative}
+.work{display:grid;grid-template-columns:252px minmax(0,1fr) 304px;min-height:0;position:relative}
 .side{background:var(--paper);overflow-y:auto;overscroll-behavior:contain;min-height:0}
 .side-left{border-right:1px solid var(--hairline);padding:16px 14px 32px}
-.side-right{border-left:1px solid var(--hairline);padding:20px 20px 40px}
+.side-right{border-left:1px solid var(--hairline);padding:16px 20px 40px}
+.rtabs{margin-bottom:22px}
 
 .search{position:relative}
 .search svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none}
@@ -93,18 +97,19 @@ button,input,select{font:inherit;color:inherit}
 .empty{color:var(--graphite);font-size:13px;margin:24px 4px}
 
 /* ---------- stage ---------- */
-.stage{position:relative;overflow:hidden;background-color:var(--paper);
+.stage{--plot-h:0px;position:relative;overflow:hidden;background-color:var(--paper);
   background-image:radial-gradient(circle,var(--grid-dot) 1px,transparent 1.4px);min-width:0}
+.stage.with-plot{--plot-h:min(330px,48%)}
 .stage.nogrid{background-image:none}
-#svg{position:absolute;inset:0;width:100%;height:100%;touch-action:none;user-select:none;-webkit-user-select:none;display:block}
+#svg{position:absolute;left:0;top:0;width:100%;height:calc(100% - var(--plot-h));touch-action:none;user-select:none;-webkit-user-select:none;display:block}
 .hint{position:absolute;left:16px;top:14px;right:16px;pointer-events:none;display:flex}
 .hint span{background:var(--paper);border:1px solid var(--hairline);border-radius:var(--r-pill);padding:6px 14px;
   font-size:13px;line-height:1.51;color:var(--graphite);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hint b{color:var(--obsidian);font-weight:500}
 
-.toolbar{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);display:flex;align-items:center;gap:2px;padding:5px;
+.toolbar{position:absolute;left:50%;bottom:calc(var(--plot-h) + 18px);transform:translateX(-50%);display:flex;align-items:center;gap:2px;padding:5px;
   background:var(--paper);border:1px solid var(--hairline);border-radius:var(--r-pill);box-shadow:var(--shadow-float);
-  max-width:calc(100% - 24px);overflow-x:auto;scrollbar-width:none}
+  max-width:calc(100% - 24px);overflow-x:auto;scrollbar-width:none;z-index:2}
 .toolbar::-webkit-scrollbar{display:none}
 .tbtn{height:34px;min-width:34px;padding:0 14px;border:0;border-radius:var(--r-pill);background:transparent;cursor:pointer;
   font-size:14px;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:nowrap;flex:none}
@@ -117,16 +122,43 @@ button,input,select{font:inherit;color:inherit}
 #zoom-label{min-width:54px;font-variant-numeric:tabular-nums;font-size:13px;color:var(--graphite);padding:0 6px}
 #btn-finish{background:var(--ash)}
 
+.tip{position:absolute;pointer-events:none;background:var(--paper);border:1px solid var(--hairline);box-shadow:var(--shadow-sm);
+  border-radius:var(--r-card);padding:8px 12px;font-size:13px;line-height:1.55;font-variant-numeric:tabular-nums;z-index:4;white-space:nowrap}
+.tip b{font-weight:500}
+.tip .mut{color:var(--graphite)}
+
+/* ---------- waveform panel ---------- */
+.plot{position:absolute;left:0;right:0;bottom:0;height:var(--plot-h);background:var(--paper);border-top:1px solid var(--hairline);
+  display:flex;flex-direction:column;z-index:3}
+.plot-head{display:flex;justify-content:space-between;align-items:center;gap:8px 12px;padding:10px 16px 2px;flex-wrap:wrap}
+.plot-title{display:flex;align-items:baseline;gap:10px;min-width:0;flex-wrap:wrap}
+.plot-title b{font-size:14px;font-weight:500}
+.stale{font-size:13px;color:var(--graphite)}
+.legend{display:flex;flex-wrap:wrap;gap:6px;padding:6px 16px 0;align-items:center}
+.lg-x{font-size:13px;color:var(--graphite);font-variant-numeric:tabular-nums;min-width:96px}
+.lg{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 4px 0 10px;border:1px solid var(--hairline);border-radius:var(--r-pill);font-size:13px;font-weight:500}
+.lg svg{flex:none}
+.lg-val{color:var(--graphite);font-variant-numeric:tabular-nums;font-weight:400}
+.lg button{border:0;background:transparent;width:22px;height:22px;border-radius:50%;cursor:pointer;color:var(--smoke);font-size:15px;line-height:1;padding:0}
+.lg button:hover{background:var(--whisper);color:var(--obsidian)}
+.plot-body{flex:1;min-height:0;position:relative}
+#plot-svg{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+
 /* ---------- properties ---------- */
-#props{display:grid;gap:28px}
+#props,#simpanel{display:grid;gap:28px}
 .pgroup{display:grid;gap:12px}
 .pgroup h2{margin:0;font-size:18px;font-weight:500;letter-spacing:-0.01em;line-height:1.32}
-.field{display:grid;gap:6px}
+.field{display:grid;gap:6px;min-width:0}
 .field>span,.flabel{font-size:13px;font-weight:500;color:var(--graphite)}
 .field input,.field select{height:38px;border:1px solid var(--hairline);border-radius:var(--r-pill);padding:0 16px;background:var(--paper);
   font-size:16px;letter-spacing:-0.01em;width:100%;min-width:0}
+.field select{appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--graphite) 50%),linear-gradient(135deg,var(--graphite) 50%,transparent 50%);
+  background-position:calc(100% - 20px) 17px,calc(100% - 15px) 17px;background-size:5px 5px;background-repeat:no-repeat;padding-right:34px}
 .field input:focus,.field select:focus{outline:none;border-color:#00000052}
+.field input[type=range]{height:24px;border:0;padding:0;accent-color:var(--obsidian)}
 .field small{font-size:13px;color:var(--smoke);line-height:1.51}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.grid3 .field input{padding:0 10px;font-size:15px}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{height:28px;padding:0 12px;border:1px solid var(--hairline);border-radius:var(--r-pill);background:transparent;font-size:13px;font-weight:500;cursor:pointer}
 .chip:hover{background:var(--whisper)}
@@ -135,14 +167,30 @@ button,input,select{font:inherit;color:inherit}
   font-size:13px;font-weight:500;color:var(--graphite)}
 .seg-btn:hover{background:var(--whisper)}
 .seg-btn[aria-pressed="true"]{background:var(--ash);border-color:transparent;color:var(--obsidian)}
-.row{display:flex;flex-wrap:wrap;gap:8px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .check{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:500;cursor:pointer;line-height:1.4}
-.check input{width:16px;height:16px;accent-color:var(--obsidian);margin:0}
+.check input{width:16px;height:16px;accent-color:var(--obsidian);margin:0;flex:none}
 .note{font-size:13px;line-height:1.51;color:var(--graphite);margin:0}
 .keys{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;font-size:13px;margin:0}
 .keys dt{white-space:nowrap}
 .keys dd{margin:0;color:var(--graphite)}
 kbd.k{font-family:var(--font-mono);font-size:12px;border:1px solid var(--hairline);border-radius:var(--r-link);padding:1px 6px;background:var(--paper);color:var(--obsidian)}
+
+.msg{font-size:13px;line-height:1.55;padding:10px 14px;border-radius:var(--r-card);border:1px solid var(--hairline);margin:0}
+.msg b{font-weight:600}
+.msg.err{border-color:var(--obsidian)}
+.meters{display:grid;gap:8px}
+.meter-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:10px 14px;border:1px solid var(--hairline);border-radius:var(--r-card);cursor:pointer}
+.meter-row:hover{background:var(--whisper)}
+.meter-row span{font-size:13px;font-weight:500;color:var(--graphite)}
+.meter-row b{font-size:22px;font-weight:500;letter-spacing:-0.01em;font-variant-numeric:tabular-nums}
+.tablewrap{overflow-x:auto;margin:0 -4px}
+.restable{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums;line-height:1.45}
+.restable th{color:var(--graphite);font-weight:500;text-align:left;padding:6px 4px;border-bottom:1px solid var(--hairline);white-space:nowrap}
+.restable td{padding:7px 4px;border-bottom:1px solid var(--hairline);vertical-align:top}
+.restable td.num,.restable th.num{text-align:right;white-space:nowrap}
+.restable tr[data-id]{cursor:pointer}
+.restable tr[data-id]:hover td{background:var(--whisper)}
 
 /* ---------- modal ---------- */
 .modal{position:fixed;inset:0;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:16px;z-index:20}
@@ -168,7 +216,7 @@ kbd.k{font-family:var(--font-mono);font-size:12px;border:1px solid var(--hairlin
 /* ---------- narrow screens ---------- */
 @media (max-width:900px){
   .work{grid-template-columns:minmax(0,1fr)}
-  .side{position:absolute;top:0;bottom:0;z-index:6;width:min(300px,88vw);transition:transform .22s ease;box-shadow:var(--shadow-float)}
+  .side{position:absolute;top:0;bottom:0;z-index:6;width:min(320px,90vw);transition:transform .22s ease;box-shadow:var(--shadow-float)}
   .side-left{left:0;transform:translateX(-102%)}
   .side-right{right:0;transform:translateX(102%)}
   .side.open{transform:none}
@@ -176,12 +224,13 @@ kbd.k{font-family:var(--font-mono);font-size:12px;border:1px solid var(--hairlin
   .pgroup.only-narrow{display:grid!important}
   .wide-only{display:none!important}
   .ex-body{grid-template-columns:minmax(0,1fr)}
+  .stage.with-plot{--plot-h:52%}
 }
 @media (max-width:560px){
   .title-input{display:none}
   .top{padding:0 12px 0 16px}
   .btn{padding:0 14px}
-  .toolbar{bottom:12px}
+  .toolbar{bottom:calc(var(--plot-h) + 12px)}
   .tbtn kbd{display:none}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -223,11 +272,15 @@ kbd.k{font-family:var(--font-mono);font-size:12px;border:1px solid var(--hairlin
         <g id="viewport"><g id="content"></g><g id="overlay" pointer-events="none"></g></g>
       </svg>
       <div class="hint"><span id="hint"></span></div>
+      <div class="tip" id="tip" hidden></div>
       <div class="toolbar" role="toolbar" aria-label="ツール">
         <button class="tbtn" data-tool="select" type="button" aria-pressed="true">選択 <kbd>V</kbd></button>
         <button class="tbtn" data-tool="wire" type="button" aria-pressed="false">配線 <kbd>W</kbd></button>
         <button class="tbtn" data-tool="text" type="button" aria-pressed="false">文字 <kbd>T</kbd></button>
         <button class="tbtn" id="btn-finish" type="button" hidden>配線を終了</button>
+        <span class="tsep"></span>
+        <button class="tbtn" id="btn-run" type="button" title="シミュレーションを実行 (⌘/Ctrl+Enter)">
+          <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5L10 6L2.5 10.5Z" fill="#000"/></svg>実行</button>
         <span class="tsep"></span>
         <button class="tbtn icon" id="btn-undo" type="button" aria-label="元に戻す" title="元に戻す (⌘/Ctrl+Z)">
           <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3.5L2.5 6.5L5.5 9.5M3 6.5H10A3.5 3.5 0 0 1 10 13.5H7" fill="none" stroke="#000" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -245,10 +298,29 @@ kbd.k{font-family:var(--font-mono);font-size:12px;border:1px solid var(--hairlin
         </button>
         <button class="tbtn" id="btn-fit" type="button" title="全体を表示 (0)">全体</button>
       </div>
+
+      <div class="plot" id="plot" hidden>
+        <div class="plot-head">
+          <div class="plot-title"><b id="plot-title">DC スイープ</b><span class="stale" id="plot-stale" hidden>回路が変更されています。もう一度実行すると反映されます。</span></div>
+          <div class="row">
+            <button class="btn pill sm" id="plot-probe" type="button" aria-pressed="true" title="回路の線や部品をクリックしてグラフに追加 (P)">プローブ</button>
+            <button class="btn ghost sm" id="plot-csv" type="button">CSV</button>
+            <button class="btn ghost sm" id="plot-png" type="button">グラフ画像</button>
+            <button class="btn ghost sm" id="plot-close" type="button">閉じる</button>
+          </div>
+        </div>
+        <div class="legend" id="plot-legend"></div>
+        <div class="plot-body" id="plot-body"><svg id="plot-svg" xmlns="http://www.w3.org/2000/svg" aria-label="シミュレーション結果のグラフ"></svg></div>
+      </div>
     </section>
 
-    <aside class="side side-right" id="side-right" aria-label="プロパティ">
+    <aside class="side side-right" id="side-right" aria-label="プロパティとシミュレーション">
+      <div class="seg rtabs" role="tablist">
+        <button class="seg-btn" type="button" data-rtab="props" aria-pressed="true">プロパティ</button>
+        <button class="seg-btn" type="button" data-rtab="sim" aria-pressed="false">シミュレーション</button>
+      </div>
       <div id="props"></div>
+      <div id="simpanel" hidden></div>
     </aside>
   </main>
 </div>
@@ -304,6 +376,7 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const clone = o => JSON.parse(JSON.stringify(o));
 const snap = v => Math.round(v / G) * G;
 const near = (a, b) => Math.abs(a[0]-b[0]) < 0.5 && Math.abs(a[1]-b[1]) < 0.5;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const textW = s => { let w = 0; for (const ch of String(s)) w += ch.charCodeAt(0) > 0x2e80 ? 1 : 0.6; return w; };
 const STORE_KEY = 'kairozu-note:v1';
 
@@ -311,7 +384,8 @@ const FONTS = {
   sans: "'Helvetica Neue', Arial, 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic', Meiryo, sans-serif",
   serif: "'Times New Roman', Times, 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif"
 };
-const DEFAULT_SETTINGS = { std: 'jis', sw: 1.6, font: 'sans', fs: 14, sub: true, ital: false };
+const DEFAULT_SETTINGS = { std: 'jis', sw: 1.6, font: 'sans', fs: 14, sub: true, ital: false, trc: true };
+const DEFAULT_SIM = { an: 'op', src: '', start: '0 V', stop: '5 V', step: '0.05 V', tstop: '10 ms', uic: true, showV: false };
 
 /* ================= symbol helpers ================= */
 function head(tx, ty, dx, dy, len = 7, w = 3.2) {
@@ -357,55 +431,78 @@ const res = s => s.std === 'ansi' ? RES_ANSI : RES_JIS;
 const CAP = '<path d="M-40 0H-5M5 0H40M-5 -14V14M5 -14V14"/>';
 const D_TRI = '<path d="M-10 -10L10 0L-10 10Z"/>';
 const D_BASE = '<path d="M-40 0H-10M10 0H40M10 -10V10"/>' + D_TRI;
-const TR = '<circle cx="4" r="24"/><path d="M-40 0H-8M-8 -15V15M-8 -6L20 -22V-40M-8 6L20 22V40"/>';
+const TR_RING = s => s.trc ? '<circle cx="4" r="24"/>' : '';
+const TR = '<path d="M-40 0H-8M-8 -15V15M-8 -6L20 -22V-40M-8 6L20 22V40"/>';
+const MOS = '<path d="M-40 0H-12M-12 -14V14M-4 -18V-8M-4 -5V5M-4 8V18M-4 -13H20V-40M-4 13H20V40M2 0H20V13"/><circle cx="20" cy="13" r="1.9" fill="#000" stroke="none"/>';
 const CIRC = '<path d="M-40 0H-16M16 0H40"/><circle r="16"/>';
+const letterUp = t => () => txtEl(t, 0, 0, 'middle', 16, { center: true });
 const meterUp = (s, c) => { const t = c.sym || ''; return txtEl(t, 0, 0, 'middle', t.length > 1 ? 12 : 16, { center: true }); };
 const meterTexts = c => c.pol ? [{ x: -25, y: -11, t: '+', s: 12 }] : [];
 
-/* pins/bbox in local coordinates (horizontal orientation, pin 0 on the left) */
+/* pins/bbox in local coordinates (horizontal orientation, pin 0 on the left).
+   sp = parameters used only by the simulator. */
 const DEFS = {
   resistor:   { name: '抵抗', cat: '受動素子', kw: 'resistor teikou r', prefix: 'R', value: '100 Ω', units: ['Ω','kΩ','MΩ'], bbox: [-24,-9,24,9], draw: res },
-  vresistor:  { name: '可変抵抗', cat: '受動素子', kw: 'variable resistor kahen vr potentiometer', prefix: 'VR', value: '10 kΩ', units: ['Ω','kΩ','MΩ'], bbox: [-24,-16,24,16], draw: s => res(s) + arrow(-20, 15, 22, -16) },
+  vresistor:  { name: '可変抵抗', cat: '受動素子', kw: 'variable resistor kahen vr', prefix: 'VR', value: '10 kΩ', units: ['Ω','kΩ','MΩ'], bbox: [-24,-16,24,16], draw: s => res(s) + arrow(-20, 15, 22, -16) },
+  pot:        { name: '可変抵抗器 (3端子)', cat: '受動素子', kw: 'potentiometer volume kahen vr 3', prefix: 'VR', value: '10 kΩ', units: ['Ω','kΩ','MΩ'],
+                pins: [[-40,0],[0,-40],[40,0]], bbox: [-24,-12,24,9], labelMode: 'bottom', draw: s => res(s) + arrow(0, -40, 0, -9),
+                sp: [{ k: 'pos', label: 'つまみの位置 (端子 1 側からの割合)', def: '50', type: 'range' }] },
   capacitor:  { name: 'コンデンサ', cat: '受動素子', kw: 'capacitor kondensa c', prefix: 'C', value: '0.1 μF', units: ['pF','nF','μF'], bbox: [-6,-14,6,14], draw: () => CAP },
   ecap:       { name: '電解コンデンサ', cat: '受動素子', kw: 'electrolytic capacitor denkai c', prefix: 'C', value: '100 μF', units: ['μF','mF'], bbox: [-9,-14,6,14],
                 draw: () => '<path d="M-40 0H-8M5 0H40M5 -14V14"/><rect x="-8" y="-14" width="5" height="28"/>', texts: () => [{ x: -16, y: -12, t: '+', s: 12 }] },
-  vcap:       { name: '可変コンデンサ', cat: '受動素子', kw: 'variable capacitor vc', prefix: 'VC', value: '', units: ['pF','nF','μF'], bbox: [-14,-16,14,16], draw: () => CAP + arrow(-14, 14, 15, -16) },
+  vcap:       { name: '可変コンデンサ', cat: '受動素子', kw: 'variable capacitor vc', prefix: 'VC', value: '100 pF', units: ['pF','nF','μF'], bbox: [-14,-16,14,16], draw: () => CAP + arrow(-14, 14, 15, -16) },
   inductor:   { name: 'コイル', cat: '受動素子', kw: 'inductor coil koiru l', prefix: 'L', value: '10 mH', units: ['μH','mH','H'], bbox: [-24,-8,24,4], draw: () => `<path d="M-40 0H-24${hump(4,12,0,1)}M24 0H40"/>` },
-  transformer:{ name: '変圧器', cat: '受動素子', kw: 'transformer hen-atsuki trans t', prefix: 'T', value: '', units: [], pins: [[-40,-40],[-40,40],[40,-40],[40,40]], bbox: [-40,-40,40,40], labelMode: 'top',
+  transformer:{ name: '変圧器', cat: '受動素子', kw: 'transformer hen-atsuki trans t', prefix: 'T', value: '1:1', units: [], pins: [[-40,-40],[-40,40],[40,-40],[40,40]], bbox: [-40,-40,40,40], labelMode: 'top',
                 draw: () => `<path d="M-40 -40H-12V-24${hump(4,0,12,1)}V40H-40M40 -40H12V-24${hump(4,0,12,0)}V40H40M-3 -26V26M3 -26V26"/>` },
 
   battery:    { name: '直流電源 (電池)', cat: '電源', kw: 'battery dc denchi e', prefix: 'E', value: '1.5 V', units: ['V','mV'], bbox: [-5,-16,7,16],
                 draw: s => `<path d="M-40 0H-4M5 0H40M-4 -16V16"/><path class="thick" d="M5 -8V8" stroke-width="${f(s.sw * 2.4)}" stroke-linecap="butt"/>`, texts: () => [{ x: -13, y: -13, t: '+', s: 12 }] },
   dcsource:   { name: '直流電圧源', cat: '電源', kw: 'dc voltage source e', prefix: 'E', value: '5 V', units: ['V','mV'], bbox: [-16,-16,16,16], draw: () => CIRC,
                 texts: () => [{ x: -7, y: 0, t: '+', s: 13 }, { x: 7, y: 0, t: '−', s: 13 }] },
-  acsource:   { name: '交流電源', cat: '電源', kw: 'ac source kouryuu e', prefix: 'E', value: '100 V', units: ['V','mV','Hz'], bbox: [-16,-16,16,16], draw: () => CIRC,
-                up: () => '<path d="M-9 0C-6 -9 -3 -9 0 0S6 9 9 0"/>' },
+  vcc:        { name: '電源端子 (Vcc)', cat: '電源', kw: 'vcc vdd rail power net label dengen', prefix: '', defLabel: 'Vcc', value: '5 V', units: ['V'], pins: [[0,0]], bbox: [-11,-14,11,0], labelMode: 'top',
+                draw: () => '<path d="M0 0V-14M-11 -14H11"/>' },
+  acsource:   { name: '交流電源', cat: '電源', kw: 'ac source sine kouryuu e', prefix: 'E', value: '1 V', units: ['V','mV'], bbox: [-16,-16,16,16], draw: () => CIRC,
+                up: () => '<path d="M-9 0C-6 -9 -3 -9 0 0S6 9 9 0"/>', sp: [{ k: 'freq', label: '周波数', def: '1 kHz' }] },
+  sqsource:   { name: '方形波電源', cat: '電源', kw: 'square pulse function generator kukeiha', prefix: 'E', value: '5 V', units: ['V','mV'], bbox: [-16,-16,16,16], draw: () => CIRC,
+                up: () => '<path d="M-10 6H-5V-6H3V6H9"/>', sp: [{ k: 'freq', label: '周波数', def: '1 kHz' }, { k: 'duty', label: 'デューティ比 [%]', def: '50' }] },
   isource:    { name: '電流源', cat: '電源', kw: 'current source denryuugen i', prefix: 'I', value: '1 mA', units: ['A','mA','μA'], bbox: [-16,-16,16,16], draw: () => CIRC + arrow(-9, 0, 10, 0, 6) },
 
   diode:      { name: 'ダイオード', cat: '半導体', kw: 'diode daiodo d', prefix: 'D', value: '', units: [], bbox: [-10,-10,10,10], draw: () => D_BASE },
-  zener:      { name: 'ツェナーダイオード', cat: '半導体', kw: 'zener diode zd', prefix: 'ZD', value: '', units: ['V'], bbox: [-10,-13,14,13],
+  zener:      { name: 'ツェナーダイオード', cat: '半導体', kw: 'zener diode zd', prefix: 'ZD', value: '5.1 V', units: ['V'], bbox: [-10,-13,14,13],
                 draw: () => '<path d="M-40 0H-10M10 0H40M6 -13L10 -10V10L14 13"/>' + D_TRI },
-  led:        { name: '発光ダイオード', cat: '半導体', kw: 'led hakkou diode', prefix: 'LED', value: '', units: [], bbox: [-10,-22,16,10], draw: () => D_BASE + arrow(0, -13, 9, -22, 5) + arrow(7, -9, 16, -18, 5) },
+  led:        { name: '発光ダイオード', cat: '半導体', kw: 'led hakkou diode', prefix: 'LED', value: '', units: [], bbox: [-10,-22,16,10], draw: () => D_BASE + arrow(0, -13, 9, -22, 5) + arrow(7, -9, 16, -18, 5),
+                sp: [{ k: 'vf', label: '順方向電圧 VF (20 mA のとき)', def: '2.0 V' }] },
   npn:        { name: 'トランジスタ NPN', cat: '半導体', kw: 'transistor npn tr bjt', prefix: 'Tr', value: '', units: [], pins: [[-40,0],[20,-40],[20,40]], bbox: [-20,-24,28,24], labelMode: 'right',
-                draw: () => TR + head(14.4, 18.8, 28, 16) },
+                draw: s => TR_RING(s) + TR + head(14.4, 18.8, 28, 16), sp: [{ k: 'hfe', label: '直流電流増幅率 hFE', def: '100' }] },
   pnp:        { name: 'トランジスタ PNP', cat: '半導体', kw: 'transistor pnp tr bjt', prefix: 'Tr', value: '', units: [], pins: [[-40,0],[20,-40],[20,40]], bbox: [-20,-24,28,24], labelMode: 'right',
-                draw: () => TR + head(0.4, 10.8, -28, -16) },
+                draw: s => TR_RING(s) + TR + head(0.4, 10.8, -28, -16), sp: [{ k: 'hfe', label: '直流電流増幅率 hFE', def: '100' }] },
+  nmos:       { name: 'MOSFET Nch', cat: '半導体', kw: 'mosfet nmos nch fet', prefix: 'Q', value: '', units: [], pins: [[-40,0],[20,-40],[20,40]], bbox: [-20,-24,28,24], labelMode: 'right',
+                draw: s => TR_RING(s) + MOS + head(-3, 0, -1, 0, 6, 3),
+                sp: [{ k: 'vth', label: 'しきい値電圧 VGS(th)', def: '2.5 V' }, { k: 'ron', label: 'オン抵抗 RDS(on) (VGS = 10 V)', def: '3.1 mΩ' }] },
+  pmos:       { name: 'MOSFET Pch', cat: '半導体', kw: 'mosfet pmos pch fet', prefix: 'Q', value: '', units: [], pins: [[-40,0],[20,-40],[20,40]], bbox: [-20,-24,28,24], labelMode: 'right',
+                draw: s => TR_RING(s) + MOS + head(9, 0, 1, 0, 6, 3),
+                sp: [{ k: 'vth', label: 'しきい値電圧 VGS(th) (大きさ)', def: '2.5 V' }, { k: 'ron', label: 'オン抵抗 RDS(on) (VGS = −10 V)', def: '10 mΩ' }] },
   opamp:      { name: 'オペアンプ', cat: '半導体', kw: 'opamp operational amplifier op', prefix: 'OP', value: '', units: [], pins: [[-60,-20],[-60,20],[60,0]], bbox: [-40,-40,40,40], labelMode: 'top',
-                draw: () => '<path d="M-60 -20H-40M-60 20H-40M40 0H60"/><path d="M-40 -40V40L40 0Z"/>', texts: () => [{ x: -29, y: -20, t: '−', s: 15 }, { x: -29, y: 20, t: '+', s: 15 }] },
+                draw: () => '<path d="M-60 -20H-40M-60 20H-40M40 0H60"/><path d="M-40 -40V40L40 0Z"/>', texts: () => [{ x: -29, y: -20, t: '−', s: 15 }, { x: -29, y: 20, t: '+', s: 15 }],
+                sp: [{ k: 'vsat', label: '出力電圧の上限 (±)', def: '13 V' }] },
 
-  voltmeter:  { name: '電圧計', cat: '計測器', kw: 'voltmeter denatsukei v', prefix: '', sym: 'V', pol: true, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: true },
-  ammeter:    { name: '電流計', cat: '計測器', kw: 'ammeter denryuukei a', prefix: '', sym: 'A', pol: true, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: true },
-  galvanometer:{ name: '検流計', cat: '計測器', kw: 'galvanometer kenryuukei g', prefix: '', sym: 'G', pol: false, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: true },
-  wattmeter:  { name: '電力計', cat: '計測器', kw: 'wattmeter denryokukei w', prefix: '', sym: 'W', pol: false, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: true },
+  voltmeter:  { name: '電圧計', cat: '計測器', kw: 'voltmeter denatsukei v tester multimeter', prefix: '', sym: 'V', pol: true, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: 'V' },
+  ammeter:    { name: '電流計', cat: '計測器', kw: 'ammeter denryuukei a tester multimeter', prefix: '', sym: 'A', pol: true, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: 'A' },
+  galvanometer:{ name: '検流計', cat: '計測器', kw: 'galvanometer kenryuukei g', prefix: '', sym: 'G', pol: false, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: 'A' },
+  wattmeter:  { name: '電力計', cat: '計測器', kw: 'wattmeter denryokukei w', prefix: '', sym: 'W', pol: false, value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: meterUp, texts: meterTexts, meter: 'A' },
   box:        { name: '測定器・装置', cat: '計測器', kw: 'box oscilloscope function generator osc block souchi', prefix: '', value: 'オシロスコープ', units: [], inner: true,
-                pins: [[-60,0],[60,0]], bbox: [-50,-30,50,30], labelMode: 'top',
+                pins: [[-60,0],[60,0]], bbox: [-50,-30,50,30], labelMode: 'top', meter: 'V',
                 draw: () => '<path d="M-60 0H-50M50 0H60"/><rect x="-50" y="-30" width="100" height="60"/>',
                 up: (s, c) => { const v = c.value || ''; return txtEl(v, 0, 0, 'middle', f(Math.min(14, 86 / Math.max(1, textW(v)))), { center: true }); } },
 
   switch:     { name: 'スイッチ', cat: '配線・その他', kw: 'switch suicchi sw', prefix: 'SW', value: '', units: [], bbox: [-19,-15,19,4],
-                draw: () => '<path d="M-40 0H-18.6M18.6 0H40M-14 -1.5L14 -14"/><circle cx="-16" r="2.6" fill="#fff"/><circle cx="16" r="2.6" fill="#fff"/>' },
-  lamp:       { name: 'ランプ', cat: '配線・その他', kw: 'lamp ranpu bulb', prefix: 'La', value: '', units: ['V','W'], bbox: [-14,-14,14,14], draw: () => '<path d="M-40 0H-14M14 0H40M-10 -10L10 10M10 -10L-10 10"/><circle r="14"/>' },
+                draw: (s, c) => `<path d="M-40 0H-18.6M18.6 0H40${c.on ? 'M-14 -1.2L14.2 -2.6' : 'M-14 -1.5L14 -14'}"/><circle cx="-16" r="2.6" fill="#fff"/><circle cx="16" r="2.6" fill="#fff"/>` },
+  motor:      { name: 'モータ', cat: '配線・その他', kw: 'motor mota m', prefix: 'M', value: '', units: [], bbox: [-16,-16,16,16], draw: () => CIRC, up: letterUp('M'),
+                sp: [{ k: 'rm', label: '巻線抵抗', def: '10 Ω' }] },
+  lamp:       { name: 'ランプ', cat: '配線・その他', kw: 'lamp ranpu bulb', prefix: 'La', value: '', units: ['V','W'], bbox: [-14,-14,14,14], draw: () => '<path d="M-40 0H-14M14 0H40M-10 -10L10 10M10 -10L-10 10"/><circle r="14"/>',
+                sp: [{ k: 'rl', label: '点灯時の抵抗', def: '50 Ω' }] },
   ground:     { name: '接地', cat: '配線・その他', kw: 'ground earth gnd setchi', prefix: '', value: '', units: [], pins: [[0,0]], bbox: [-13,0,13,24], labelMode: 'right', draw: () => '<path d="M0 0V12M-13 12H13M-8 18H8M-3 24H3"/>' },
+  gnd:        { name: '接地 (三角)', cat: '配線・その他', kw: 'ground gnd triangle setchi sankaku', prefix: '', value: '', units: [], pins: [[0,0]], bbox: [-11,0,11,23], labelMode: 'right', draw: () => '<path d="M0 0V10M-11 10H11L0 23Z"/>' },
   terminal:   { name: '端子', cat: '配線・その他', kw: 'terminal tanshi', prefix: '', value: '', units: [], pins: [[0,0]], bbox: [-5,-5,5,5], labelMode: 'top', draw: () => '<circle r="4" fill="#fff"/>' },
   dot:        { name: '接続点', cat: '配線・その他', kw: 'junction dot setsuzokuten', prefix: '', value: '', units: [], pins: [[0,0]], bbox: [-4,-4,4,4], labelMode: 'top', draw: s => `<circle r="${f(s.sw * 2)}" fill="#000" stroke="none"/>` },
 };
@@ -419,47 +516,53 @@ let tool = 'select', placeType = null;
 const ghost = { rot: 0, flip: false };
 let sel = new Set();
 let hover = null, draft = null, cursor = null, drag = null, pinch = null;
-let spaceDown = false, showGrid = true;
+let spaceDown = false, showGrid = true, rtab = 'props';
 const pointers = new Map();
 let hist = [], hi = -1, clip = null, pasteN = 0;
 const EX = { bg: 'white', scale: 2, margin: 20 };
+let simRes = null, simMsg = null, simStale = false;
+const plot = { traces: [] };
 
 const svg = $('#svg'), viewportG = $('#viewport'), contentG = $('#content'), overlayG = $('#overlay'), stage = $('#stage'), measure = $('#measure');
 
-function blankDoc() { return { app: 'kairozu-note', v: 1, title: '', settings: { ...DEFAULT_SETTINGS }, comps: [], wires: [], texts: [] }; }
+function blankDoc() { return { app: 'kairozu-note', v: 2, title: '', settings: { ...DEFAULT_SETTINGS }, sim: { ...DEFAULT_SIM }, comps: [], wires: [], texts: [] }; }
+function newComp(type, x, y, rot, label, value, extra = {}) {
+  const d = DEFS[type];
+  return { id: uid(), type, x, y, rot, flip: false, label, value, sym: d.sym, pol: d.pol, lp: 'auto', lo: null, on: false, sp: {}, ...extra };
+}
 function normalize(o) {
   const d = blankDoc();
   d.title = typeof o.title === 'string' ? o.title : '';
   d.settings = { ...DEFAULT_SETTINGS, ...(o.settings || {}) };
+  d.sim = { ...DEFAULT_SIM, ...(o.sim || {}) };
   d.comps = (o.comps || []).filter(c => c && DEFS[c.type]).map(c => ({ id: c.id || uid(), type: c.type, x: +c.x || 0, y: +c.y || 0, rot: (c.rot | 0) % 4, flip: !!c.flip,
-    label: c.label ?? '', value: c.value ?? '', sym: c.sym ?? DEFS[c.type].sym, pol: c.pol ?? DEFS[c.type].pol, lp: c.lp || 'auto', lo: c.lo || null }));
+    label: c.label ?? '', value: c.value ?? '', sym: c.sym ?? DEFS[c.type].sym, pol: c.pol ?? DEFS[c.type].pol, lp: c.lp || 'auto', lo: c.lo || null,
+    on: !!c.on, sp: (c.sp && typeof c.sp === 'object') ? c.sp : {} }));
   d.wires = (o.wires || []).filter(w => w && Array.isArray(w.pts) && w.pts.length >= 2).map(w => ({ id: w.id || uid(), pts: w.pts.map(p => [+p[0], +p[1]]) }));
   d.texts = (o.texts || []).filter(t => t && typeof t.text === 'string').map(t => ({ id: t.id || uid(), x: +t.x || 0, y: +t.y || 0, text: t.text, size: +t.size || 14 }));
   return d;
 }
 
-/* Example shown on first visit: measuring the voltage across R2 in a divider */
+/* Example shown on first visit: the LED current-limiting circuit from the course (3 V, 50 Ω, VF = 2.0 V → 20 mA) */
 function sampleDoc() {
-  const c = (type, x, y, rot, label, value) => ({ id: uid(), type, x, y, rot, flip: false, label, value, sym: DEFS[type].sym, pol: DEFS[type].pol, lp: 'auto', lo: null });
   const d = blankDoc();
-  d.title = '例：分圧回路の電圧測定';
+  d.title = '例：LED の電流制限回路';
   d.comps = [
-    c('battery', 100, 220, 1, 'E', '3.0 V'),
-    c('switch', 180, 100, 0, 'SW', ''),
-    c('ammeter', 300, 100, 0, '', ''),
-    c('resistor', 420, 180, 1, 'R1', '1 kΩ'),
-    c('resistor', 420, 300, 1, 'R2', '2 kΩ'),
-    c('voltmeter', 540, 300, 1, '', ''),
+    newComp('battery', 100, 220, 1, 'E', '3.0 V'),
+    newComp('ammeter', 220, 100, 0, '', ''),
+    newComp('resistor', 340, 100, 0, 'R1', '50 Ω'),
+    newComp('led', 440, 220, 1, 'LED', ''),
+    newComp('voltmeter', 540, 220, 1, '', ''),
+    newComp('gnd', 260, 340, 0, '', ''),
   ];
   const w = pts => ({ id: uid(), pts });
   d.wires = [
-    w([[100,180],[100,100],[140,100]]),
-    w([[220,100],[260,100]]),
-    w([[340,100],[420,100],[420,140]]),
-    w([[420,220],[420,260]]),
-    w([[420,340],[420,380],[100,380],[100,260]]),
-    w([[540,260],[540,240],[420,240]]),
-    w([[540,340],[540,380],[420,380]]),
+    w([[100,180],[100,100],[180,100]]),
+    w([[260,100],[300,100]]),
+    w([[380,100],[440,100],[440,180]]),
+    w([[440,260],[440,340],[100,340],[100,260]]),
+    w([[540,180],[540,140],[440,140]]),
+    w([[540,260],[540,300],[440,300]]),
   ];
   return d;
 }
@@ -627,11 +730,12 @@ function highlight(id, strong) {
   const boxRect = (b, pad) => `<rect x="${f(b.x1 - pad)}" y="${f(b.y1 - pad)}" width="${f(b.x2 - b.x1 + pad * 2)}" height="${f(b.y2 - b.y1 + pad * 2)}" rx="${f(4 / k)}" fill="#000" fill-opacity="${strong ? .04 : .03}"${strong ? ` stroke="#000" stroke-width="${f(1 / k)}" stroke-dasharray="${f(4 / k)} ${f(3 / k)}"` : ' stroke="none"'}/>`;
   if (c) return boxRect(hitBoxOf(c), 6);
   const w = findWire(id);
-  if (w) return `<path d="${wireD(w.pts)}" fill="none" stroke="#000" stroke-opacity="${strong ? .16 : .08}" stroke-width="${f(10 / k)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+  if (w) return wireHalo(w, strong ? .16 : .08);
   const t = findText(id);
   if (t) { const b = textBox(id); if (b) return boxRect(b, 4); }
   return '';
 }
+const wireHalo = (w, op) => `<path d="${wireD(w.pts)}" fill="none" stroke="#000" stroke-opacity="${op}" stroke-width="${f(10 / view.k)}" stroke-linecap="round" stroke-linejoin="round"/>`;
 function routeTo(a, b) {
   if (a[0] === b[0] || a[1] === b[1]) return [b];
   let h;
@@ -640,8 +744,16 @@ function routeTo(a, b) {
   else h = Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1]);
   return h ? [[b[0], a[1]], b] : [[a[0], b[1]], b];
 }
+function pill(str, x, y, anchor) {
+  const k = view.k, fs = 12 / k, padX = 8 / k, h = 22 / k, w = textW(str) * 12 / k + padX * 2 + 2 / k;
+  const x0 = anchor === 'middle' ? x - w / 2 : anchor === 'end' ? x - w : x;
+  return `<rect x="${f(x0)}" y="${f(y)}" width="${f(w)}" height="${f(h)}" rx="${f(h / 2)}" fill="#fff" stroke="#000" stroke-width="${f(1 / k)}"/>` +
+    `<text x="${f(x0 + w / 2)}" y="${f(y + h / 2)}" dy="0.35em" text-anchor="middle" font-size="${f(fs)}" font-weight="500" fill="#000" style="font-variant-numeric:tabular-nums">${esc(str)}</text>`;
+}
 function renderOverlay() {
   const k = view.k, s = doc.settings; let m = '';
+  if (simRes && simRes.kind === 'op' && !simStale) m += opOverlay();
+  if (tool === 'probe' && hover) m += probeHalo(hover);
   if (tool === 'select' && hover && !sel.has(hover) && !drag) m += highlight(hover, false);
   for (const id of sel) m += highlight(id, true);
   if (tool === 'select' && sel.size === 1) {
@@ -654,7 +766,7 @@ function renderOverlay() {
   }
   if (tool === 'place' && cursor && placeType) {
     const d = DEFS[placeType];
-    const c = { id: 'ghost', type: placeType, x: cursor[0], y: cursor[1], rot: ghost.rot, flip: ghost.flip, label: '', value: d.inner ? d.value : '', sym: d.sym, pol: d.pol };
+    const c = { ...newComp(placeType, cursor[0], cursor[1], ghost.rot, '', d.inner ? d.value : ''), id: 'ghost', flip: ghost.flip };
     m += `<g opacity=".45" ${strokeAttrs(s)} font-family="${FONTS[s.font]}">${compMarkup(c, s)}</g>`;
   }
   if (tool === 'wire') {
@@ -674,7 +786,7 @@ function renderOverlay() {
 
 function iconSVG(t) {
   const d = DEFS[t];
-  const c = { id: 'i', type: t, x: 0, y: 0, rot: 0, flip: false, label: '', value: '', sym: d.sym, pol: false };
+  const c = { ...newComp(t, 0, 0, 0, '', ''), id: 'i', pol: false };
   const b = boxOf([[d.bbox[0], d.bbox[1]], [d.bbox[2], d.bbox[3]], ...d.pins]);
   const pad = 3, s = { ...doc.settings, sw: 2 };
   return `<svg viewBox="${b.x1 - pad} ${b.y1 - pad} ${b.x2 - b.x1 + pad * 2} ${b.y2 - b.y1 + pad * 2}" aria-hidden="true"><g ${strokeAttrs(s)} font-family="${FONTS.sans}">${compMarkup(c, s)}</g></svg>`;
@@ -731,12 +843,14 @@ function pruneSel() { for (const id of [...sel]) if (!findComp(id) && !findWire(
 function updateUndo() { $('#btn-undo').disabled = hi <= 0; $('#btn-redo').disabled = hi >= hist.length - 1; }
 function commit(opts = {}) {
   const sj = JSON.stringify(doc);
-  if (hist[hi] !== sj) { hist = hist.slice(0, hi + 1); hist.push(sj); if (hist.length > 300) hist.shift(); hi = hist.length - 1; persistSoon(); }
+  const changed = hist[hi] !== sj;
+  if (changed) { hist = hist.slice(0, hi + 1); hist.push(sj); if (hist.length > 300) hist.shift(); hi = hist.length - 1; persistSoon(); }
   pruneSel(); renderCanvas();
   if (opts.props !== false) renderProps();
   updateUndo();
+  if (changed) docChanged();
 }
-function restore(i) { hi = i; doc = JSON.parse(hist[hi]); pruneSel(); renderCanvas(); renderProps(); renderPalette(); syncTitle(); updateUndo(); persistSoon(); }
+function restore(i) { hi = i; doc = JSON.parse(hist[hi]); pruneSel(); renderCanvas(); renderProps(); renderPalette(); syncTitle(); updateUndo(); persistSoon(); docChanged(); }
 const undo = () => { if (draft) { draft = null; renderOverlay(); updateHint(); return; } if (hi > 0) restore(hi - 1); };
 const redo = () => { if (hi < hist.length - 1) restore(hi + 1); };
 
@@ -749,7 +863,7 @@ function nextLabel(prefix) {
 }
 function placeAt(p) {
   const d = DEFS[placeType]; if (!d) return;
-  doc.comps.push({ id: uid(), type: placeType, x: p[0], y: p[1], rot: ghost.rot, flip: ghost.flip, label: nextLabel(d.prefix), value: d.value, sym: d.sym, pol: d.pol, lp: 'auto', lo: null });
+  doc.comps.push({ ...newComp(placeType, p[0], p[1], ghost.rot, d.defLabel ?? nextLabel(d.prefix), d.value), flip: ghost.flip });
   commit();
 }
 function wireClick(p) {
@@ -768,7 +882,7 @@ function finishWire() {
 }
 function addText(w) {
   const t = { id: uid(), x: Math.round(w[0] / 10) * 10, y: Math.round(w[1] / 10) * 10, text: 'テキスト', size: doc.settings.fs };
-  doc.texts.push(t); sel = new Set([t.id]); setTool('select'); commit();
+  doc.texts.push(t); sel = new Set([t.id]); setTool('select'); setRtab('props'); commit();
   openRight();
   const el = $('#p-text'); if (el) { el.focus(); el.select(); }
 }
@@ -825,13 +939,15 @@ function paste() {
   sel = ns; commit();
 }
 function selectAll() { sel = new Set([...doc.comps, ...doc.wires, ...doc.texts].map(x => x.id)); renderOverlay(); renderProps(); }
+function toggleSwitch(c) { c.on = !c.on; commit(); toast(c.on ? `${nameOf(c)} を閉じました (ON)` : `${nameOf(c)} を開きました (OFF)`); }
 
 /* ================= tools ================= */
 function setTool(t, type) {
   if (draft && t !== 'wire') finishWire();
   tool = t; placeType = t === 'place' ? type : null;
-  hover = null;
+  hover = null; hideTip();
   document.querySelectorAll('.tbtn[data-tool]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
+  $('#plot-probe').setAttribute('aria-pressed', String(t === 'probe'));
   syncPalettePressed();
   svg.style.cursor = t === 'select' ? 'default' : 'crosshair';
   renderOverlay(); updateHint();
@@ -841,9 +957,11 @@ function updateHint() {
   if (tool === 'place') h = `クリックで<b>${DEFS[placeType].name}</b>を配置 · R 回転 · F 反転 · Esc で終了`;
   else if (tool === 'wire') h = draft ? 'クリックで折り曲げ · 端子や線に当てると完了 · ダブルクリック / Enter で終了' : '端子をクリックして<b>配線</b>を始めます';
   else if (tool === 'text') h = 'クリックした位置に<b>文字</b>を置きます';
+  else if (tool === 'probe') h = '<b>プローブ</b>: 線をクリックで電圧、部品をクリックで電流をグラフに追加 · Esc で終了';
   else if (sel.size === 1 && findWire([...sel][0])) h = '線分をドラッグして平行移動 · 角の四角をドラッグして形を調整';
   else if (sel.size) h = 'ドラッグで移動 · R 回転 · F 反転 · Delete で削除 · ラベルもドラッグで動かせます';
-  else h = '左の一覧から部品を選んで配置 · W で配線 · ドラッグで範囲選択';
+  else if (simRes && simRes.kind === 'op') h = '線や部品にカーソルを合わせると電圧・電流を表示 · スイッチはダブルクリックで切り替え';
+  else h = '左の一覧から部品を選んで配置 · W で配線 · ▶ 実行でシミュレーション';
   $('#hint').innerHTML = h;
   $('#btn-finish').hidden = !(tool === 'wire' && draft);
 }
@@ -871,6 +989,7 @@ svg.addEventListener('pointerdown', e => {
   if (isNarrow() && closeDrawers()) return;
   try { svg.setPointerCapture(e.pointerId); } catch (_) {}
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  hideTip();
   if (pointers.size === 2) {
     const [a, b] = [...pointers.values()];
     if (drag && drag.orig) { doc = drag.orig; renderCanvas(); }
@@ -886,6 +1005,7 @@ svg.addEventListener('pointerdown', e => {
   if (tool === 'place') { placeAt(sp); return; }
   if (tool === 'wire') { wireClick(sp); return; }
   if (tool === 'text') { addText(w); return; }
+  if (tool === 'probe') { const h = hitTest(w, e.target); if (h) probeAt(h); else if (e.pointerType === 'touch') startPan(e); else startPan(e); return; }
 
   const hEl = e.target.closest && e.target.closest('[data-handle]');
   if (hEl) { const [wid, idx] = hEl.dataset.handle.split(':'); drag = { kind: 'vertex', wid, idx: +idx, orig: clone(doc), start: w, moved: false }; return; }
@@ -956,11 +1076,14 @@ svg.addEventListener('pointermove', e => {
     }
     renderCanvas(); return;
   }
-  if (tool === 'select') {
+  if (tool === 'select' || tool === 'probe') {
     const h = hitTest(w, e.target), hid = h ? h.id : null;
-    const onLab = e.target.closest && e.target.closest('[data-lab],[data-handle]');
-    svg.style.cursor = (h || onLab) ? 'move' : (spaceDown ? 'grab' : 'default');
+    if (tool === 'select') {
+      const onLab = e.target.closest && e.target.closest('[data-lab],[data-handle]');
+      svg.style.cursor = (h || onLab) ? 'move' : (spaceDown ? 'grab' : 'default');
+    }
     if (hid !== hover) { hover = hid; renderOverlay(); }
+    showTipFor(h, e);
   } else renderOverlay();
 });
 
@@ -980,7 +1103,7 @@ function endPointer(e) {
 }
 svg.addEventListener('pointerup', endPointer);
 svg.addEventListener('pointercancel', endPointer);
-svg.addEventListener('pointerleave', () => { if (!drag && pointers.size === 0) { cursor = null; if (hover) hover = null; renderOverlay(); } });
+svg.addEventListener('pointerleave', () => { if (!drag && pointers.size === 0) { cursor = null; if (hover) hover = null; hideTip(); renderOverlay(); } });
 svg.addEventListener('contextmenu', e => e.preventDefault());
 svg.addEventListener('dblclick', e => {
   if (tool === 'wire') { finishWire(); return; }
@@ -988,7 +1111,9 @@ svg.addEventListener('dblclick', e => {
   const lab = e.target.closest && e.target.closest('[data-lab]');
   const h = lab ? { kind: 'comp', id: lab.dataset.lab } : hitTest(toWorld(e), e.target);
   if (!h) return;
-  sel = new Set([h.id]); renderProps(); renderOverlay(); openRight();
+  const c = findComp(h.id);
+  if (c && c.type === 'switch' && !lab) { sel = new Set([c.id]); toggleSwitch(c); return; }
+  sel = new Set([h.id]); setRtab('props'); renderProps(); renderOverlay(); openRight();
   const el = h.kind === 'text' ? $('#p-text') : lab ? $('#p-label') : ($('#p-value') || $('#p-label'));
   if (el) { el.focus(); el.select(); }
 });
@@ -1003,6 +1128,7 @@ svg.addEventListener('wheel', e => {
 window.addEventListener('keydown', e => {
   const ae = document.activeElement;
   const typing = ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable);
+  const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (e.key === 'Escape') {
     if (!$('#export-modal').hidden) { closeExport(); return; }
     if (!$('#confirm-modal').hidden) { $('#confirm-modal').hidden = true; return; }
@@ -1012,12 +1138,12 @@ window.addEventListener('keydown', e => {
     else if (sel.size) { sel.clear(); renderOverlay(); renderProps(); updateHint(); }
     return;
   }
+  if (mod && e.key === 'Enter') { e.preventDefault(); if (typing) ae.blur(); runSim(); return; }
   if (typing) {
     if (e.key === 'Enter' && ae.id === 'part-search') { const first = $('.pal-item'); if (first) { first.click(); ae.blur(); } }
     return;
   }
   if (!$('#export-modal').hidden || !$('#confirm-modal').hidden) return;
-  const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
   if (mod) {
     if (k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
     else if (k === 'y') { e.preventDefault(); redo(); }
@@ -1034,6 +1160,7 @@ window.addEventListener('keydown', e => {
   if (k === 'v') setTool('select');
   else if (k === 'w') setTool('wire');
   else if (k === 't') setTool('text');
+  else if (k === 'p') { if (simRes && simRes.kind !== 'op') setTool(tool === 'probe' ? 'select' : 'probe'); }
   else if (k === 'r') rotateSel();
   else if (k === 'f') flipSel();
   else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSel(); }
@@ -1059,7 +1186,14 @@ window.addEventListener('blur', () => { spaceDown = false; });
 const seg = (scope, key, opts, cur) => `<div class="seg" role="group" data-scope="${scope}" data-key="${key}">` +
   opts.map(([v, l]) => `<button type="button" class="seg-btn" data-val="${v}" aria-pressed="${String(cur) === String(v)}">${l}</button>`).join('') + '</div>';
 const field = (id, label, value, extra = '') => `<label class="field"><span>${label}</span><input id="${id}" value="${esc(value)}" autocomplete="off" spellcheck="false">${extra}</label>`;
+const spv = (c, k) => { const d = DEFS[c.type]; const v = c.sp && c.sp[k]; if (v != null && v !== '') return v; const p = (d.sp || []).find(x => x.k === k); return p ? p.def : ''; };
 
+function setRtab(t) {
+  rtab = t;
+  document.querySelectorAll('[data-rtab]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.rtab === t)));
+  $('#props').hidden = t !== 'props'; $('#simpanel').hidden = t !== 'sim';
+  if (t === 'sim') renderSim();
+}
 function renderProps() {
   const P = $('#props'), ids = [...sel];
   if (ids.length === 1) {
@@ -1073,12 +1207,23 @@ function renderProps() {
 function compPanel(c) {
   const d = DEFS[c.type];
   const units = d.units.length ? `<div class="chips">${d.units.map(u => `<button type="button" class="chip" data-unit="${u}">${u}</button>`).join('')}</div>` : '';
+  const valueLabel = d.inner ? '表示する名前' : c.type === 'transformer' ? '巻数比 (一次:二次)' : c.type === 'acsource' ? '振幅 (ピーク値)' : c.type === 'zener' ? 'ツェナー電圧' : '値';
   let m = `<section class="pgroup"><div class="eyebrow">部品</div><h2>${d.name}</h2>
     ${field('p-label', '記号', c.label, '<small>R1 のように英字＋数字にすると数字が下付きになります。_ の後ろも下付きです (例: V_out)。</small>')}
-    ${field('p-value', d.inner ? '表示する名前' : '値', c.value)}${units}`;
-  if (d.meter) m += `${field('p-sym', '計器の文字', c.sym || '')}<label class="check"><input type="checkbox" id="p-pol"${c.pol ? ' checked' : ''}>＋端子の印を付ける</label>`;
-  m += `</section>
-  <section class="pgroup"><div class="eyebrow">向き</div><div class="row">
+    ${field('p-value', valueLabel, c.value)}${units}`;
+  if (d.meter && d.sym) m += `${field('p-sym', '計器の文字', c.sym || '')}<label class="check"><input type="checkbox" id="p-pol"${c.pol ? ' checked' : ''}>＋端子の印を付ける</label>`;
+  if (c.type === 'switch') m += `<div class="field"><span>状態</span>${seg('c', 'on', [['false', '開 (OFF)'], ['true', '閉 (ON)']], String(!!c.on))}<small>キャンバス上でダブルクリックしても切り替えられます。</small></div>`;
+  m += '</section>';
+  if (d.sp && d.sp.length) {
+    m += `<section class="pgroup"><div class="eyebrow">シミュレーション用の値</div>`;
+    for (const p of d.sp) {
+      const v = spv(c, p.k);
+      if (p.type === 'range') m += `<label class="field"><span>${p.label}: <b id="sp-${p.k}-out">${esc(v)} %</b></span><input type="range" id="sp-${p.k}" min="0" max="100" step="1" value="${esc(v)}"></label>`;
+      else m += field(`sp-${p.k}`, p.label, v);
+    }
+    m += `</section>`;
+  }
+  m += `<section class="pgroup"><div class="eyebrow">向き</div><div class="row">
     <button class="btn pill sm" type="button" data-act="rotate">回転 R</button>
     <button class="btn pill sm" type="button" data-act="flip">反転 F</button></div></section>
   <section class="pgroup"><div class="eyebrow">ラベルの位置</div>
@@ -1120,6 +1265,7 @@ function settingsPanel() {
       <div class="field"><span>文字の大きさ</span>${seg('s', 'fs', [[12, '12'], [14, '14'], [16, '16'], [18, '18']], s.fs)}</div>
       <label class="check"><input type="checkbox" id="s-sub"${s.sub ? ' checked' : ''}>記号の番号を下付きにする (R1 → R₁)</label>
       <label class="check"><input type="checkbox" id="s-ital"${s.ital ? ' checked' : ''}>記号を斜体にする</label>
+      <label class="check"><input type="checkbox" id="s-trc"${s.trc ? ' checked' : ''}>トランジスタ・MOSFET を丸で囲む</label>
       <label class="check"><input type="checkbox" id="s-grid"${showGrid ? ' checked' : ''}>方眼を表示する</label>
     </section>
     <section class="pgroup"><div class="eyebrow">ショートカット</div>
@@ -1127,6 +1273,7 @@ function settingsPanel() {
         ${kb(['V'], '選択')}${kb(['W'], '配線')}${kb(['T'], '文字')}
         ${kb(['R'], '回転')}${kb(['F'], '反転')}${kb(['Delete'], '削除')}
         ${kb(['↑↓←→'], '1 マス移動')}
+        ${kb([mod, 'Enter'], 'シミュレーション実行')}${kb(['P'], 'プローブ (グラフ表示中)')}
         ${kb([mod, 'Z'], '元に戻す')}${kb([mod, 'D'], '複製')}${kb([mod, 'C', '/', 'V'], 'コピー・貼り付け')}
         ${kb([mod, 'E'], '書き出し')}${kb(['Space'], '押しながらドラッグで画面移動')}
         ${kb([mod, 'ホイール'], 'ズーム')}${kb(['0'], '全体を表示')}${kb(['/'], '部品を検索')}
@@ -1145,17 +1292,21 @@ props.addEventListener('input', e => {
   if (c && id === 'p-label') c.label = el.value;
   else if (c && id === 'p-value') c.value = el.value;
   else if (c && id === 'p-sym') c.sym = el.value;
+  else if (c && id.startsWith('sp-')) {
+    const k = id.slice(3); c.sp = { ...(c.sp || {}), [k]: el.value };
+    const out = $(`#sp-${k}-out`); if (out) out.textContent = `${el.value} %`;
+    persistSoon(); docChanged(); return;
+  }
   else if (t && id === 'p-text') t.text = el.value;
   else return;
-  renderCanvas(); persistSoon();
+  renderCanvas(); persistSoon(); docChanged();
 });
 props.addEventListener('change', e => {
   const el = e.target, id = el.id;
-  if (id === 's-sub') { doc.settings.sub = el.checked; commit({ props: false }); return; }
-  if (id === 's-ital') { doc.settings.ital = el.checked; commit({ props: false }); return; }
+  if (id === 's-sub' || id === 's-ital' || id === 's-trc') { doc.settings[id.slice(2)] = el.checked; if (id === 's-trc') renderPalette(); commit({ props: false }); return; }
   if (id === 's-grid') { showGrid = el.checked; applyView(); return; }
   if (id === 'p-pol') { const c = findComp([...sel][0]); if (c) { c.pol = el.checked; commit({ props: false }); } return; }
-  if (/^(p-|s-title)/.test(id)) commit({ props: false });
+  if (/^(p-|sp-|s-title)/.test(id)) commit({ props: false });
 });
 props.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') e.target.blur(); });
 props.addEventListener('click', e => {
@@ -1163,9 +1314,9 @@ props.addEventListener('click', e => {
   const one = [...sel][0];
   if (b.classList.contains('seg-btn')) {
     const g = b.parentElement, key = g.dataset.key, scope = g.dataset.scope, raw = b.dataset.val;
-    const val = isNaN(+raw) ? raw : +raw;
+    const val = raw === 'true' ? true : raw === 'false' ? false : isNaN(+raw) ? raw : +raw;
     if (scope === 's') { doc.settings[key] = val; if (key === 'std') renderPalette(); commit(); }
-    else if (scope === 'c') { const c = findComp(one); if (c) { c[key] = val; c.lo = null; commit(); } }
+    else if (scope === 'c') { const c = findComp(one); if (c) { c[key] = val; if (key === 'lp') c.lo = null; commit(); } }
     else if (scope === 't') { const t = findText(one); if (t) { t[key] = val; commit(); } }
     return;
   }
@@ -1181,6 +1332,747 @@ props.addEventListener('click', e => {
     case 'save': saveJSON(); break;
   }
 });
+document.querySelector('.rtabs').addEventListener('click', e => { const b = e.target.closest('[data-rtab]'); if (b) setRtab(b.dataset.rtab); });
+
+/* ================= simulation engine (modified nodal analysis + Newton–Raphson) ================= */
+const VT = 0.025852, GMIN = 1e-12, AOL = 1e5;
+const expL = x => x < 40 ? Math.exp(x) : Math.exp(40) * (1 + x - 40);
+const dexpL = x => x < 40 ? Math.exp(x) : Math.exp(40);
+const SI = { T: 1e12, G: 1e9, M: 1e6, meg: 1e6, Meg: 1e6, k: 1e3, K: 1e3, m: 1e-3, u: 1e-6, 'μ': 1e-6, 'µ': 1e-6, n: 1e-9, p: 1e-12, f: 1e-15 };
+function parseSI(str) {
+  const m = String(str ?? '').replace(/,/g, '').trim().match(/^([-+−]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*(meg|Meg|[TGMkKmuμµnpf])?/);
+  if (!m) return NaN;
+  let v = parseFloat(m[1].replace('−', '-'));
+  if (m[2]) v *= SI[m[2]];
+  return v;
+}
+function fmt(v, unit) {
+  if (v == null || !isFinite(v)) return '—';
+  const a = Math.abs(v);
+  if (a < 1e-15) return `0 ${unit}`;
+  const P = [[1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'μ'], [1e-9, 'n'], [1e-12, 'p'], [1e-15, 'f']];
+  let p = P.find(q => a >= q[0] * 0.99995) || P[P.length - 1];
+  const n = v / p[0], an = Math.abs(n);
+  const s = an >= 100 ? n.toFixed(1) : an >= 10 ? n.toFixed(2) : n.toFixed(3);
+  return `${s} ${p[1]}${unit}`;
+}
+
+function diodeF(Is, n) {
+  const nvt = n * VT;
+  return v => { const x = v[0] - v[1], a = x / nvt; const i = Is * (expL(a) - 1) + GMIN * x, g = Is * dexpL(a) / nvt + GMIN; return { I: [i, -i], J: [[g, -g], [-g, g]] }; };
+}
+function zenerF(Is, Vz) {
+  const Ibv = 1e-3;
+  return v => {
+    const x = v[0] - v[1], a = x / VT, b = -(x + Vz) / VT;
+    const i = Is * (expL(a) - 1) - Ibv * expL(b) + GMIN * x;
+    const g = Is * dexpL(a) / VT + Ibv * dexpL(b) / VT + GMIN;
+    return { I: [i, -i], J: [[g, -g], [-g, g]] };
+  };
+}
+function bjtF(beta, pnp) {
+  const Is = 1e-14, bR = 1, s = pnp ? -1 : 1;
+  return v => { // terminals [B, C, E]
+    const vbe = s * (v[0] - v[2]), vbc = s * (v[0] - v[1]);
+    const ef = expL(vbe / VT), er = expL(vbc / VT), df = dexpL(vbe / VT) / VT, dr = dexpL(vbc / VT) / VT;
+    const ic = Is * (ef - er) - Is / bR * (er - 1) + GMIN * (vbe - vbc);
+    const ib = Is / beta * (ef - 1) + Is / bR * (er - 1) + GMIN * (vbe + vbc);
+    const row = (dbe, dbc) => [dbe + dbc, -dbc, -dbe];
+    const JC = row(Is * df + GMIN, -Is * dr - Is / bR * dr - GMIN), JB = row(Is / beta * df + GMIN, Is / bR * dr + GMIN);
+    const JE = JB.map((x, i) => -(x + JC[i]));
+    return { I: [s * ib, s * ic, -s * (ic + ib)], J: [JB, JC, JE] };
+  };
+}
+function mosF(vth, K, pmos) {
+  const s = pmos ? -1 : 1, lam = 0.01, nvt = 2 * 1.5 * VT, Isd = 1e-12;
+  const core = (vgs, vds) => {
+    const u = (vgs - vth) / nvt;
+    const sp = u > 30 ? u : Math.log1p(Math.exp(u)), sg = u > 30 ? 1 : 1 / (1 + Math.exp(-u)), vov = nvt * sp;
+    let id, dov, dds;
+    if (vds < vov) { id = K * (vov * vds - vds * vds / 2); dov = K * vds; dds = K * (vov - vds); }
+    else { id = K / 2 * vov * vov; dov = K * vov; dds = 0; }
+    const m = 1 + lam * vds;
+    return { id: id * m, gm: dov * sg * m, gds: dds * m + id * lam };
+  };
+  return v => { // terminals [G, D, S]
+    const vg = s * v[0], vd = s * v[1], vs = s * v[2];
+    let I, J;
+    if (vd >= vs) { const r = core(vg - vs, vd - vs); I = [0, r.id, -r.id]; J = [[0, 0, 0], [r.gm, r.gds, -r.gm - r.gds], [-r.gm, -r.gds, r.gm + r.gds]]; }
+    else { const r = core(vg - vd, vs - vd); I = [0, -r.id, r.id]; J = [[0, 0, 0], [-r.gm, r.gm + r.gds, -r.gds], [r.gm, -r.gm - r.gds, r.gds]]; }
+    // body diode: anode = source, cathode = drain
+    const x = vs - vd, a = x / VT, i = Isd * (expL(a) - 1) + GMIN * x, g = Isd * dexpL(a) / VT + GMIN;
+    I[2] += i; I[1] -= i; J[2][2] += g; J[2][1] -= g; J[1][2] -= g; J[1][1] += g;
+    return { I: I.map(q => s * q), J };
+  };
+}
+
+const SWEEPABLE = new Set(['battery', 'dcsource', 'vcc', 'isource']);
+const GROUND_TYPES = new Set(['ground', 'gnd']);
+function compNames() {
+  const base = c => String(c.label || '').trim() || DEFS[c.type].name;
+  const cnt = {}; doc.comps.forEach(c => { const b = base(c); cnt[b] = (cnt[b] || 0) + 1; });
+  const seen = {}, out = new Map();
+  for (const c of doc.comps) { const b = base(c); if (cnt[b] > 1) { seen[b] = (seen[b] || 0) + 1; out.set(c.id, `${b}${String(c.label || '').trim() ? ' #' : ''}${seen[b]}`); } else out.set(c.id, b); }
+  return out;
+}
+const nameOf = c => compNames().get(c.id) || DEFS[c.type].name;
+const ptKey = p => `${Math.round(p[0])},${Math.round(p[1])}`;
+
+function buildNet() {
+  const errs = [], warns = [], names = compNames();
+  const parent = new Map();
+  const find = k => { if (!parent.has(k)) { parent.set(k, k); return k; } let r = k; while (parent.get(r) !== r) r = parent.get(r); let c = k; while (parent.get(c) !== r) { const n = parent.get(c); parent.set(c, r); c = n; } return r; };
+  const uni = (a, b) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(ra, rb); };
+  const pts = [], compPins = new Map();
+  for (const w of doc.wires) for (const p of w.pts) { pts.push(p); find(ptKey(p)); }
+  for (const c of doc.comps) { const ps = pinsOf(c).map(p => [Math.round(p[0]), Math.round(p[1])]); compPins.set(c.id, ps); ps.forEach(p => { pts.push(p); find(ptKey(p)); }); }
+  for (const w of doc.wires) for (let i = 0; i < w.pts.length - 1; i++) {
+    const a = w.pts[i], b = w.pts[i + 1]; uni(ptKey(a), ptKey(b));
+    for (const p of pts) if (onSeg(p, a, b)) uni(ptKey(p), ptKey(a));
+  }
+  const rails = new Map();
+  for (const c of doc.comps) if (c.type === 'vcc') { const nm = String(c.label || '').trim(); if (!nm) continue; const k = ptKey(compPins.get(c.id)[0]); if (rails.has(nm)) uni(k, rails.get(nm)); else rails.set(nm, k); }
+  let gk = null;
+  for (const c of doc.comps) if (GROUND_TYPES.has(c.type)) { const k = ptKey(compPins.get(c.id)[0]); if (gk) uni(k, gk); else gk = k; }
+  if (!gk) {
+    const src = doc.comps.find(c => ['battery', 'dcsource', 'acsource', 'sqsource', 'isource'].includes(c.type));
+    if (src) { gk = ptKey(compPins.get(src.id)[1]); warns.push(`接地記号がないため、${names.get(src.id)} の − 側を 0 V としました。`); }
+    else if (!doc.comps.some(c => c.type === 'vcc')) errs.push('電源が見つかりません。電池や電源を置いてください。');
+  }
+  const groot = gk ? find(gk) : null;
+  const nodeOf = new Map(); let n = 0;
+  for (const k of parent.keys()) { const r = find(k); if (r === groot) continue; if (!nodeOf.has(r)) nodeOf.set(r, n++); }
+  const nodeAt = k => { if (!parent.has(k)) return null; const r = find(k); return r === groot ? -1 : nodeOf.get(r); };
+
+  // dangling pins
+  const pinCount = new Map();
+  for (const c of doc.comps) for (const p of compPins.get(c.id)) { const nd = nodeAt(ptKey(p)); pinCount.set(nd, (pinCount.get(nd) || 0) + 1); }
+  const dangling = [];
+  for (const c of doc.comps) {
+    if (['terminal', 'dot', 'ground', 'gnd', 'vcc'].includes(c.type)) continue;
+    if (compPins.get(c.id).some(p => { const nd = nodeAt(ptKey(p)); return nd !== -1 && pinCount.get(nd) === 1; })) dangling.push(names.get(c.id));
+  }
+  if (dangling.length) warns.push(`${dangling.slice(0, 4).join('、')}${dangling.length > 4 ? ' ほか' : ''} の端子がどこにもつながっていません。`);
+
+  let nb = 0, nl = false;
+  const els = [], ce = new Map(), N0 = n;
+  const R = (a, b, r) => { const e = { t: 'R', a, b, g: 1 / r }; els.push(e); return e; };
+  const Vs = (a, b, fn, src) => { const e = { t: 'V', a, b, br: N0 + nb++, f: fn, src }; els.push(e); return e; };
+  const NL = (ns, fn) => { const e = { t: 'N', ns, f: fn }; els.push(e); nl = true; return e; };
+  for (const c of doc.comps) {
+    const nm = names.get(c.id), ns = compPins.get(c.id).map(p => nodeAt(ptKey(p)));
+    const val = (s, what, pos = true) => { const v = parseSI(s); if (!isFinite(v) || (pos && v <= 0)) { errs.push(`${nm} の${what}「${String(s ?? '').trim() || '空欄'}」を数値として読めません。`); return null; } return v; };
+    const P = k => spv(c, k);
+    let en = null;
+    switch (c.type) {
+      case 'resistor': case 'vresistor': { const r = val(c.value, '抵抗値'); if (r != null) en = { kind: 'R2', e: R(ns[0], ns[1], r) }; break; }
+      case 'lamp': { const r = val(P('rl'), '点灯時の抵抗'); if (r != null) en = { kind: 'R2', e: R(ns[0], ns[1], r) }; break; }
+      case 'motor': { const r = val(P('rm'), '巻線抵抗'); if (r != null) en = { kind: 'R2', e: R(ns[0], ns[1], r) }; break; }
+      case 'switch': en = { kind: 'R2', e: R(ns[0], ns[1], c.on ? 1e-3 : 1e12) }; break;
+      case 'voltmeter': en = { kind: 'R2', e: R(ns[0], ns[1], 1e7), meter: 'V' }; break;
+      case 'box': en = { kind: 'R2', e: R(ns[0], ns[1], 1e6), meter: 'V' }; break;
+      case 'ammeter': case 'galvanometer': case 'wattmeter': en = { kind: 'V2', e: Vs(ns[0], ns[1], () => 0, false), meter: 'A' }; break;
+      case 'pot': {
+        const r = val(c.value, '抵抗値'); if (r == null) break;
+        const pos = clamp((parseSI(P('pos')) || 0) / 100, 0, 1);
+        en = { kind: 'pot', e1: R(ns[0], ns[1], Math.max(r * pos, 1e-3)), e2: R(ns[1], ns[2], Math.max(r * (1 - pos), 1e-3)) }; break;
+      }
+      case 'capacitor': case 'ecap': case 'vcap': { const C = val(c.value, '容量'); if (C != null) { const e = { t: 'C', a: ns[0], b: ns[1], C, vp: 0 }; els.push(e); en = { kind: 'C', e }; } break; }
+      case 'inductor': { const L = val(c.value, 'インダクタンス'); if (L != null) { const e = { t: 'L', a: ns[0], b: ns[1], br: N0 + nb++, L, ip: 0 }; els.push(e); en = { kind: 'L', e }; } break; }
+      case 'battery': case 'dcsource': { const v = val(c.value, '電圧', false); if (v != null) { const e = Vs(ns[0], ns[1], () => v, true); e.dc = v; en = { kind: 'V2', e, src: 'v' }; } break; }
+      case 'vcc': {
+        if (!String(c.value || '').trim()) { en = { kind: 'none' }; break; }
+        const v = val(c.value, '電圧', false); if (v != null) { const e = Vs(ns[0], -1, () => v, true); e.dc = v; en = { kind: 'V1', e, src: 'v' }; } break;
+      }
+      case 'acsource': {
+        const A = val(c.value, '振幅', false), fr = val(P('freq'), '周波数'); if (A == null || fr == null) break;
+        const e = Vs(ns[0], ns[1], t => A * Math.sin(2 * Math.PI * fr * t), true); e.freq = fr; en = { kind: 'V2', e, src: 'v' }; break;
+      }
+      case 'sqsource': {
+        const A = val(c.value, '電圧', false), fr = val(P('freq'), '周波数'); if (A == null || fr == null) break;
+        const duty = clamp((parseSI(P('duty')) || 50) / 100, 0.01, 0.99);
+        const e = Vs(ns[0], ns[1], t => ((t * fr) % 1) < duty ? A : 0, true); e.freq = fr * 5; en = { kind: 'V2', e, src: 'v' }; break;
+      }
+      case 'isource': { const I = val(c.value, '電流', false); if (I != null) { const e = { t: 'I', a: ns[0], b: ns[1], f: () => I, src: true, dc: I }; els.push(e); en = { kind: 'I2', e, src: 'i' }; } break; }
+      case 'diode': en = { kind: 'N', e: NL(ns, diodeF(1e-14, 1)) }; break;
+      case 'led': { const vf = val(P('vf'), '順方向電圧'); if (vf != null) en = { kind: 'N', e: NL(ns, diodeF(0.02 / Math.exp(vf / (2 * VT)), 2)) }; break; }
+      case 'zener': { const vz = String(c.value || '').trim() ? val(c.value, 'ツェナー電圧') : 5.1; if (vz != null) en = { kind: 'N', e: NL(ns, zenerF(1e-14, vz)) }; break; }
+      case 'npn': case 'pnp': { const b = val(P('hfe'), 'hFE'); if (b != null) en = { kind: 'N', e: NL(ns, bjtF(b, c.type === 'pnp')) }; break; }
+      case 'nmos': case 'pmos': {
+        const vth = val(P('vth'), 'しきい値電圧', false), ron = val(P('ron'), 'オン抵抗'); if (vth == null || ron == null) break;
+        const vt = Math.abs(vth), K = 1 / (ron * Math.max(0.5, 10 - vt));
+        en = { kind: 'N', e: NL(ns, mosF(vt, K, c.type === 'pmos')) }; break;
+      }
+      case 'opamp': { const vs = val(P('vsat'), '出力電圧の上限'); if (vs != null) { const e = { t: 'E', m: ns[0], p: ns[1], o: ns[2], br: N0 + nb++, vsat: vs }; els.push(e); nl = true; en = { kind: 'E', e }; } break; }
+      case 'transformer': {
+        const s = String(c.value || '').trim(); let ratio = 1;
+        const m = s.match(/^([\d.]+)\s*[:：]\s*([\d.]+)/);
+        if (m) ratio = parseFloat(m[2]) / parseFloat(m[1]); else if (s) ratio = parseSI(s);
+        if (!isFinite(ratio) || ratio <= 0) { errs.push(`${nm} の巻数比「${s}」を読めません。1:2 のように書いてください。`); break; }
+        const e = { t: 'X', p1: ns[0], p2: ns[1], s1: ns[2], s2: ns[3], br: N0 + nb++, n: ratio }; els.push(e); en = { kind: 'X', e }; break;
+      }
+      default: en = { kind: 'none' };
+    }
+    if (en) { en.c = c; en.ns = ns; en.name = nm; ce.set(c.id, en); }
+  }
+  if (!els.length && !errs.length) errs.push('シミュレーションできる部品がありません。');
+  // node names: rail labels first, otherwise the parts that meet there
+  const nodeName = new Array(n).fill(null), nodeParts = Array.from({ length: n }, () => []);
+  for (const c of doc.comps) {
+    const ns = compPins.get(c.id).map(p => nodeAt(ptKey(p)));
+    ns.forEach(nd => { if (nd >= 0) { if (c.type === 'vcc' && String(c.label || '').trim()) nodeName[nd] = String(c.label).trim(); else if (!GROUND_TYPES.has(c.type) && !['terminal', 'dot'].includes(c.type)) nodeParts[nd].push(names.get(c.id)); } });
+  }
+  for (let i = 0; i < n; i++) if (!nodeName[i]) { const ps = [...new Set(nodeParts[i])]; nodeName[i] = ps.length ? ps.slice(0, 2).join('–') : `n${i + 1}`; }
+  const wireNode = new Map(); for (const w of doc.wires) wireNode.set(w.id, nodeAt(ptKey(w.pts[0])));
+  return { n, N: n + nb, els, ce, nl, errs, warns, nodeAt, nodeName, wireNode };
+}
+
+function assemble(net, x, ctx) {
+  const N = net.N, A = new Float64Array(N * N), b = new Float64Array(N);
+  const a = (i, j, v) => { if (i >= 0 && j >= 0) A[i * N + j] += v; };
+  const r = (i, v) => { if (i >= 0) b[i] += v; };
+  const nv = i => i < 0 ? 0 : x[i];
+  for (let i = 0; i < net.n; i++) A[i * N + i] += GMIN;
+  for (const e of net.els) switch (e.t) {
+    case 'R': a(e.a, e.a, e.g); a(e.b, e.b, e.g); a(e.a, e.b, -e.g); a(e.b, e.a, -e.g); break;
+    case 'V': a(e.a, e.br, 1); a(e.b, e.br, -1); a(e.br, e.a, 1); a(e.br, e.b, -1); r(e.br, e.f(ctx.t) * (e.src ? ctx.scale : 1)); break;
+    case 'I': { const I = e.f(ctx.t) * ctx.scale; r(e.a, -I); r(e.b, I); break; }
+    case 'C': if (ctx.mode === 'tran') { const g = e.C / ctx.h; a(e.a, e.a, g); a(e.b, e.b, g); a(e.a, e.b, -g); a(e.b, e.a, -g); r(e.a, g * e.vp); r(e.b, -g * e.vp); } break;
+    case 'L': a(e.a, e.br, 1); a(e.b, e.br, -1); a(e.br, e.a, 1); a(e.br, e.b, -1); if (ctx.mode === 'tran') { a(e.br, e.br, -e.L / ctx.h); r(e.br, -e.L / ctx.h * e.ip); } break;
+    case 'N': {
+      const v = e.ns.map(nv), { I, J } = e.f(v);
+      for (let k = 0; k < e.ns.length; k++) { let s = I[k]; for (let j = 0; j < e.ns.length; j++) { a(e.ns[k], e.ns[j], J[k][j]); s -= J[k][j] * v[j]; } r(e.ns[k], -s); }
+      break;
+    }
+    case 'E': {
+      a(e.o, e.br, 1); a(e.br, e.o, 1);
+      const vd = nv(e.p) - nv(e.m), th = Math.tanh(AOL * vd / e.vsat), fv = e.vsat * th, fp = AOL * (1 - th * th);
+      a(e.br, e.p, -fp); a(e.br, e.m, fp); r(e.br, fv - fp * vd); break;
+    }
+    case 'X':
+      a(e.s1, e.br, 1); a(e.s2, e.br, -1); a(e.p1, e.br, -e.n); a(e.p2, e.br, e.n);
+      a(e.br, e.s1, 1); a(e.br, e.s2, -1); a(e.br, e.p1, -e.n); a(e.br, e.p2, e.n); break;
+  }
+  return { A, b };
+}
+function solveLin(A, b, N) {
+  for (let c = 0; c < N; c++) {
+    let p = c, mx = Math.abs(A[c * N + c]);
+    for (let r = c + 1; r < N; r++) { const v = Math.abs(A[r * N + c]); if (v > mx) { mx = v; p = r; } }
+    if (mx < 1e-30) return null;
+    if (p !== c) { for (let k = 0; k < N; k++) { const t = A[c * N + k]; A[c * N + k] = A[p * N + k]; A[p * N + k] = t; } const t = b[c]; b[c] = b[p]; b[p] = t; }
+    const d = A[c * N + c];
+    for (let r = c + 1; r < N; r++) { const q = A[r * N + c] / d; if (q === 0) continue; for (let k = c; k < N; k++) A[r * N + k] -= q * A[c * N + k]; b[r] -= q * b[c]; }
+  }
+  for (let r = N - 1; r >= 0; r--) { let s = b[r]; for (let k = r + 1; k < N; k++) s -= A[r * N + k] * b[k]; b[r] = s / A[r * N + r]; }
+  return b;
+}
+function newton(net, x0, ctx, maxIt) {
+  const x = Float64Array.from(x0), n = net.n, N = net.N;
+  for (let it = 0; it < maxIt; it++) {
+    const { A, b } = assemble(net, x, ctx), xn = solveLin(A, b, N);
+    if (!xn) return { err: 'singular' };
+    if (!net.nl) return { x: xn };
+    let md = 0; for (let i = 0; i < n; i++) md = Math.max(md, Math.abs(xn[i] - x[i]));
+    if (!isFinite(md)) return { err: 'noconv' };
+    const al = md > 1.5 ? 1.5 / md : 1;
+    let conv = al === 1;
+    for (let i = 0; i < N; i++) {
+      const d = xn[i] - x[i], tol = (i < n ? 1e-6 : 1e-9) + 1e-6 * Math.abs(xn[i]);
+      if (Math.abs(d) > tol) conv = false;
+      x[i] += al * d;
+    }
+    if (conv && it > 0) return { x };
+  }
+  return { err: 'noconv' };
+}
+class SimError extends Error {}
+const SIM_TEXT = {
+  singular: '回路の式を解けませんでした。電池や電流計どうしが直接並列になっていないか、どこにもつながらない部品がないか確認してください。',
+  noconv: '計算が収束しませんでした。部品の値や向き、配線を確認してください。'
+};
+function dcop(net, guess) {
+  const ctx = { mode: 'dc', t: 0, h: 0, scale: 1 };
+  let r = newton(net, guess || new Float64Array(net.N), ctx, 300);
+  if (r.x) return r.x;
+  if (r.err === 'singular') throw new SimError(SIM_TEXT.singular);
+  let x = new Float64Array(net.N);
+  for (let k = 1; k <= 50; k++) { ctx.scale = k / 50; r = newton(net, x, ctx, 300); if (!r.x) throw new SimError(SIM_TEXT[r.err]); x = r.x; }
+  return x;
+}
+function currents(net, x, ctx) {
+  const v = i => i < 0 ? 0 : x[i], out = {};
+  for (const [id, en] of net.ce) {
+    const e = en.e; let I;
+    switch (en.kind) {
+      case 'R2': { const i = e.g * (v(e.a) - v(e.b)); I = [i, -i]; break; }
+      case 'pot': { const i0 = en.e1.g * (v(en.e1.a) - v(en.e1.b)), i2 = en.e2.g * (v(en.e2.b) - v(en.e2.a)); I = [i0, -(i0 + i2), i2]; break; }
+      case 'V2': I = [x[e.br], -x[e.br]]; break;
+      case 'V1': I = [x[e.br]]; break;
+      case 'I2': { const i = e.f(ctx.t); I = [i, -i]; break; }
+      case 'C': { const i = ctx.mode === 'tran' ? e.C / ctx.h * ((v(e.a) - v(e.b)) - e.vp) : 0; I = [i, -i]; break; }
+      case 'L': I = [x[e.br], -x[e.br]]; break;
+      case 'N': I = e.f(e.ns.map(v)).I; break;
+      case 'E': I = [0, 0, x[e.br]]; break;
+      case 'X': { const i = x[e.br]; I = [-e.n * i, e.n * i, i, -i]; break; }
+      default: I = [];
+    }
+    out[id] = I;
+  }
+  return out;
+}
+function runOp(net) {
+  const x = dcop(net);
+  return { kind: 'op', net, xs: [0], sols: [x], curs: [currents(net, x, { mode: 'dc', t: 0 })] };
+}
+function runSweep(net, S) {
+  const en = net.ce.get(S.src);
+  if (!en || !en.src) throw new SimError('変化させる電源を選んでください。');
+  const a = parseSI(S.start), b = parseSI(S.stop); let st = Math.abs(parseSI(S.step));
+  if (!isFinite(a) || !isFinite(b) || !isFinite(st) || st === 0) throw new SimError('開始・終了・刻みに数値を入れてください (例: 0 V、5 V、0.05 V)。');
+  let cnt = Math.floor(Math.abs(b - a) / st + 1e-9) + 1;
+  if (cnt > 2001) { st = Math.abs(b - a) / 2000; cnt = 2001; }
+  const dir = b >= a ? 1 : -1, e = en.e;
+  const xs = [], sols = [], curs = [];
+  let x = null;
+  for (let i = 0; i < cnt; i++) {
+    const val = a + dir * st * i; e.f = () => val;
+    const ctx = { mode: 'dc', t: 0, h: 0, scale: 1 };
+    let r = x ? newton(net, x, ctx, 200) : null;
+    let sol = r && r.x;
+    if (!sol) sol = dcop(net, x);
+    x = sol; xs.push(val); sols.push(Float64Array.from(sol)); curs.push(currents(net, sol, ctx));
+  }
+  const isI = en.src === 'i';
+  return { kind: 'dc', net, xs, sols, curs, xName: `${en.name} の${isI ? '電流' : '電圧'}`, xUnit: isI ? 'A' : 'V', srcId: S.src };
+}
+function runTran(net, S) {
+  const tstop = parseSI(S.tstop);
+  if (!isFinite(tstop) || tstop <= 0) throw new SimError('終了時間に正の数値を入れてください (例: 10 ms)。');
+  let maxF = 0; for (const e of net.els) if (e.freq) maxF = Math.max(maxF, e.freq);
+  let h = tstop / 1000; if (maxF) h = Math.min(h, 1 / (maxF * 60));
+  let warn = null;
+  if (tstop / h > 40000) { h = tstop / 40000; warn = '終了時間が周期に対して長いため、計算の刻みを粗くしました。'; }
+  const caps = net.els.filter(e => e.t === 'C'), inds = net.els.filter(e => e.t === 'L');
+  const v = (x, i) => i < 0 ? 0 : x[i];
+  let x;
+  const xs = [], sols = [], curs = [];
+  if (S.uic) { x = new Float64Array(net.N); caps.forEach(e => e.vp = 0); inds.forEach(e => e.ip = 0); xs.push(0); sols.push(Float64Array.from(x)); curs.push(currents(net, x, { mode: 'dc', t: 0 })); }
+  else { x = dcop(net); caps.forEach(e => e.vp = v(x, e.a) - v(x, e.b)); inds.forEach(e => e.ip = x[e.br]); xs.push(0); sols.push(Float64Array.from(x)); curs.push(currents(net, x, { mode: 'dc', t: 0 })); }
+  const total = Math.ceil(tstop / h), keep = Math.max(1, Math.ceil(total / 3000));
+  let t = 0, step = 0;
+  while (t < tstop * (1 - 1e-9)) {
+    let hh = Math.min(h, tstop - t), ok = false;
+    for (let tries = 0; tries < 8; tries++) {
+      const ctx = { mode: 'tran', t: t + hh, h: hh, scale: 1 };
+      const r = newton(net, x, ctx, 100);
+      if (r.err === 'singular') throw new SimError(SIM_TEXT.singular);
+      if (r.x) {
+        x = r.x; t += hh; step++; ok = true;
+        const cur = currents(net, x, ctx);
+        caps.forEach(e => e.vp = v(x, e.a) - v(x, e.b)); inds.forEach(e => e.ip = x[e.br]);
+        if (step % keep === 0 || t >= tstop * (1 - 1e-9)) { xs.push(t); sols.push(Float64Array.from(x)); curs.push(cur); }
+        break;
+      }
+      hh /= 4;
+    }
+    if (!ok) throw new SimError(`${fmt(t, 's')} の時点で計算が収束しませんでした。部品の値や配線を確認してください。`);
+  }
+  return { kind: 'tran', net, xs, sols, curs, xName: '時間', xUnit: 's', warn };
+}
+
+/* quantities shown for each part */
+function opInfo(res, en, i) {
+  const x = res.sols[i], I = res.curs[i][en.c.id] || [], t = en.c.type;
+  const v = k => { const nd = en.ns[k]; return nd == null || nd < 0 ? 0 : x[nd]; };
+  if (en.kind === 'none') return null;
+  if (en.meter === 'V') return { V: fmt(v(0) - v(1), 'V'), I: '—', P: '—' };
+  if (en.meter === 'A') return { V: '—', I: fmt(I[0], 'A'), P: '—' };
+  if (t === 'vcc') { const vv = v(0), ii = -I[0]; return { V: fmt(vv, 'V'), I: fmt(ii, 'A'), P: `供給 ${fmt(vv * ii, 'W')}` }; }
+  if (en.src === 'v') { const vv = v(0) - v(1), ii = -I[0]; return { V: fmt(vv, 'V'), I: fmt(ii, 'A'), P: `供給 ${fmt(vv * ii, 'W')}` }; }
+  if (en.src === 'i') { const vv = v(1) - v(0), ii = -I[1]; return { V: fmt(vv, 'V'), I: fmt(ii, 'A'), P: `供給 ${fmt(vv * ii, 'W')}` }; }
+  if (t === 'npn' || t === 'pnp') { const vce = v(1) - v(2), vbe = v(0) - v(2); return { V: `VCE ${fmt(vce, 'V')}<br>VBE ${fmt(vbe, 'V')}`, I: `IC ${fmt(I[1], 'A')}<br>IB ${fmt(I[0], 'A')}`, P: fmt(vce * I[1] + vbe * I[0], 'W') }; }
+  if (t === 'nmos' || t === 'pmos') { const vds = v(1) - v(2), vgs = v(0) - v(2); return { V: `VDS ${fmt(vds, 'V')}<br>VGS ${fmt(vgs, 'V')}`, I: `ID ${fmt(I[1], 'A')}`, P: fmt(vds * I[1], 'W') }; }
+  if (t === 'opamp') return { V: `出力 ${fmt(v(2), 'V')}`, I: `出力 ${fmt(-I[2], 'A')}`, P: '—' };
+  if (t === 'transformer') return { V: `一次 ${fmt(v(0) - v(1), 'V')}<br>二次 ${fmt(v(2) - v(3), 'V')}`, I: `一次 ${fmt(I[0], 'A')}<br>二次 ${fmt(-I[2], 'A')}`, P: '—' };
+  if (t === 'pot') { const p = (v(0) - v(1)) * I[0] + (v(2) - v(1)) * I[2]; return { V: fmt(v(0) - v(2), 'V'), I: fmt(I[0], 'A'), P: fmt(p, 'W') }; }
+  const vv = v(0) - v(1), ii = I[0];
+  return { V: fmt(vv, 'V'), I: fmt(ii, 'A'), P: fmt(vv * ii, 'W') };
+}
+function meterValue(res, en, i) {
+  const x = res.sols[i], nv = nd => nd == null || nd < 0 ? 0 : x[nd];
+  if (en.meter === 'V') return { v: nv(en.ns[0]) - nv(en.ns[1]), unit: 'V' };
+  if (en.meter === 'A') return { v: (res.curs[i][en.c.id] || [])[0], unit: 'A' };
+  return null;
+}
+
+/* ================= simulation UI ================= */
+function runSim(opts = {}) {
+  if (draft) finishWire();
+  const S = doc.sim;
+  if (S.an === 'dc' && !doc.comps.some(c => c.id === S.src && SWEEPABLE.has(c.type))) {
+    const first = doc.comps.find(c => SWEEPABLE.has(c.type) && !(c.type === 'vcc' && !String(c.value || '').trim()));
+    S.src = first ? first.id : '';
+  }
+  const net = buildNet();
+  simStale = false;
+  if (net.errs.length) { simRes = null; simMsg = { errs: net.errs, warns: net.warns }; closePlot(); }
+  else {
+    try {
+      const t0 = performance.now();
+      simRes = S.an === 'dc' ? runSweep(net, S) : S.an === 'tran' ? runTran(net, S) : runOp(net);
+      simRes.ms = performance.now() - t0;
+      simMsg = { errs: [], warns: net.warns.concat(simRes.warn ? [simRes.warn] : []) };
+      if (simRes.kind === 'op') closePlot(); else openPlot(true);
+    } catch (err) {
+      if (!(err instanceof SimError)) console.error(err);
+      simRes = null; simMsg = { errs: [err instanceof SimError ? err.message : '計算中に問題が起きました。回路を確認してください。'], warns: net.warns }; closePlot();
+    }
+  }
+  if (!opts.silent) { setRtab('sim'); if (simMsg.errs.length) openRight(); }
+  renderSim(); renderOverlay(); updateHint();
+  if (!opts.silent && simMsg.errs.length) toast('シミュレーションできませんでした。右のパネルを確認してください');
+}
+let simTimer = 0;
+function docChanged() {
+  if (!simRes) return;
+  if (simRes.kind === 'op') { clearTimeout(simTimer); simTimer = setTimeout(() => runSim({ silent: true }), 120); }
+  else if (!simStale) { simStale = true; $('#plot-stale').hidden = false; }
+}
+function clearSim() { simRes = null; simMsg = null; simStale = false; closePlot(); renderSim(); renderOverlay(); updateHint(); }
+
+function renderSim() {
+  const P = $('#simpanel'); if (P.hidden) return;
+  const S = doc.sim;
+  const srcs = doc.comps.filter(c => SWEEPABLE.has(c.type) && !(c.type === 'vcc' && !String(c.value || '').trim()));
+  let m = `<section class="pgroup"><div class="eyebrow">解析</div><h2>シミュレーション</h2>
+    ${seg('sim', 'an', [['op', 'DC 動作点'], ['dc', 'DC スイープ'], ['tran', '過渡解析']], S.an)}`;
+  if (S.an === 'op') m += `<p class="note">電源をつないだ状態の電圧・電流を求めます。計器に読みが表示され、回路や値を変えると自動で計算し直します。</p>`;
+  if (S.an === 'dc') {
+    if (srcs.length) {
+      const cur = srcs.find(c => c.id === S.src) || srcs[0];
+      m += `<label class="field"><span>変化させる電源</span><select id="sim-src">${srcs.map(c => `<option value="${c.id}"${c.id === cur.id ? ' selected' : ''}>${esc(nameOf(c))} (${esc(c.value)})</option>`).join('')}</select></label>
+      <div class="grid3">${field('sim-start', '開始', S.start)}${field('sim-stop', '終了', S.stop)}${field('sim-step', '刻み', S.step)}</div>
+      <p class="note">電源の値を少しずつ変えて、電圧・電流の変化をグラフにします。電流源を選んだときは A で入力します。</p>`;
+    } else m += `<p class="note">電池・直流電圧源・電流源・Vcc を置くと選べます。</p>`;
+  }
+  if (S.an === 'tran') m += `${field('sim-tstop', '終了時間', S.tstop)}
+    <label class="check"><input type="checkbox" id="sim-uic"${S.uic ? ' checked' : ''}>t = 0 で電源を入れる (コンデンサは空の状態から)</label>
+    <p class="note">時間とともに変わる電圧・電流をグラフにします。交流電源・方形波電源の波形や、コンデンサの充電を確かめられます。</p>`;
+  m += `<div class="row"><button class="btn pill strong" type="button" id="sim-run">実行</button>${simRes ? '<button class="btn ghost sm" type="button" id="sim-clear">結果を消す</button>' : ''}</div></section>`;
+
+  if (simMsg) {
+    const ms = simMsg.errs.map(t => `<p class="msg err"><b>エラー</b> ${esc(t)}</p>`).concat(simMsg.warns.map(t => `<p class="msg"><b>注意</b> ${esc(t)}</p>`));
+    if (ms.length) m += `<section class="pgroup">${ms.join('')}</section>`;
+  }
+  if (simRes && simRes.kind === 'op') {
+    const meters = [...simRes.net.ce.values()].filter(en => en.meter && findComp(en.c.id));
+    if (meters.length) m += `<section class="pgroup"><div class="eyebrow">計器の読み</div><div class="meters">${meters.map(en => { const r = meterValue(simRes, en, 0); return `<div class="meter-row" data-id="${en.c.id}"><span>${esc(en.name)}</span><b>${fmt(r.v, r.unit)}</b></div>`; }).join('')}</div></section>`;
+    const rows = [...simRes.net.ce.values()].filter(en => !en.meter && findComp(en.c.id)).map(en => [en, opInfo(simRes, en, 0)]).filter(r => r[1]);
+    if (rows.length) m += `<section class="pgroup"><div class="eyebrow">部品ごとの値</div><div class="tablewrap"><table class="restable">
+      <thead><tr><th>部品</th><th class="num">電圧</th><th class="num">電流</th><th class="num">電力</th></tr></thead><tbody>
+      ${rows.map(([en, r]) => `<tr data-id="${en.c.id}"><td>${esc(en.name)}</td><td class="num">${r.V}</td><td class="num">${r.I}</td><td class="num">${r.P}</td></tr>`).join('')}
+      </tbody></table></div><div class="row"><button class="btn ghost sm" type="button" id="sim-copy">表をコピー</button></div></section>`;
+    m += `<section class="pgroup"><label class="check"><input type="checkbox" id="sim-showv"${S.showV ? ' checked' : ''}>各ノードの電圧を回路図に表示する</label></section>`;
+  } else if (simRes) {
+    m += `<section class="pgroup"><p class="note">下のグラフに結果を表示しています (${simRes.xs.length} 点・${Math.max(1, Math.round(simRes.ms))} ms)。プローブで回路の線をクリックすると電圧、部品をクリックすると電流を追加できます。</p></section>`;
+  }
+  m += `<section class="pgroup"><div class="eyebrow">計算モデル</div><p class="note">電圧計は内部抵抗 10 MΩ、電流計は 0 Ω として計算します。ダイオード・LED・トランジスタ・MOSFET は簡単なモデルで近似しているため、実測値とは多少ずれます。実験の予想や確認に使ってください。</p></section>`;
+  P.innerHTML = m;
+}
+const simpanel = $('#simpanel');
+simpanel.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  const row = e.target.closest('[data-id]');
+  if (!b && row) { const c = findComp(row.dataset.id); if (c) { sel = new Set([c.id]); renderOverlay(); updateHint(); } return; }
+  if (!b) return;
+  if (b.classList.contains('seg-btn')) { doc.sim.an = b.dataset.val; persistSoon(); renderSim(); return; }
+  if (b.id === 'sim-run') runSim();
+  else if (b.id === 'sim-clear') clearSim();
+  else if (b.id === 'sim-copy') copyTable();
+});
+simpanel.addEventListener('input', e => {
+  const id = e.target.id, S = doc.sim;
+  const map = { 'sim-start': 'start', 'sim-stop': 'stop', 'sim-step': 'step', 'sim-tstop': 'tstop' };
+  if (map[id]) { S[map[id]] = e.target.value; persistSoon(); }
+});
+simpanel.addEventListener('change', e => {
+  const id = e.target.id, S = doc.sim;
+  if (id === 'sim-src') { S.src = e.target.value; const c = findComp(S.src); if (c && c.type === 'isource' && /V\s*$/.test(S.stop)) { S.start = '0 mA'; S.stop = '10 mA'; S.step = '0.1 mA'; renderSim(); } persistSoon(); }
+  else if (id === 'sim-uic') { S.uic = e.target.checked; persistSoon(); }
+  else if (id === 'sim-showv') { S.showV = e.target.checked; persistSoon(); renderOverlay(); }
+});
+simpanel.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') { e.target.blur(); runSim(); } });
+function copyTable() {
+  if (!simRes || simRes.kind !== 'op') return;
+  const strip = s => String(s).replace(/<br>/g, ' / ');
+  const lines = ['部品\t電圧\t電流\t電力'];
+  for (const en of simRes.net.ce.values()) {
+    if (!findComp(en.c.id)) continue;
+    if (en.meter) { const r = meterValue(simRes, en, 0); lines.push(`${en.name}\t${en.meter === 'V' ? fmt(r.v, 'V') : ''}\t${en.meter === 'A' ? fmt(r.v, 'A') : ''}\t`); continue; }
+    const r = opInfo(simRes, en, 0); if (r) lines.push([en.name, strip(r.V), strip(r.I), strip(r.P)].join('\t'));
+  }
+  const text = lines.join('\n');
+  Promise.resolve().then(() => navigator.clipboard.writeText(text)).then(() => toast('表をコピーしました。Excel や Word に貼り付けできます'), () => toast('コピーできませんでした'));
+}
+
+/* canvas annotations for the operating point */
+function opOverlay() {
+  const res = simRes, k = view.k; let m = '';
+  if (doc.sim.showV) {
+    const done = new Set();
+    for (const w of doc.wires) {
+      const nd = res.net.wireNode.get(w.id); if (nd == null || nd < 0 || done.has(nd)) continue; done.add(nd);
+      const p = w.pts.reduce((a, b) => (b[1] < a[1] || (b[1] === a[1] && b[0] < a[0])) ? b : a);
+      m += `<text x="${f(p[0] + 5 / k)}" y="${f(p[1] - 6 / k)}" font-size="${f(11 / k)}" fill="#666" stroke="#fff" stroke-width="${f(3 / k)}" paint-order="stroke" style="font-variant-numeric:tabular-nums">${esc(fmt(res.sols[0][nd], 'V'))}</text>`;
+    }
+  }
+  for (const en of res.net.ce.values()) {
+    if (!en.meter) continue;
+    const c = findComp(en.c.id); if (!c) continue;
+    const r = meterValue(res, en, 0), str = fmt(r.v, r.unit);
+    const b = bboxOf(c); let side = labelSide(c);
+    if (c.label || (c.value && !DEFS[c.type].inner)) side = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' }[side];
+    const g = 8 / k, h = 22 / k;
+    if (side === 'top') m += pill(str, (b.x1 + b.x2) / 2, b.y1 - g - h, 'middle');
+    else if (side === 'bottom') m += pill(str, (b.x1 + b.x2) / 2, b.y2 + g, 'middle');
+    else if (side === 'left') m += pill(str, b.x1 - g, (b.y1 + b.y2) / 2 - h / 2, 'end');
+    else m += pill(str, b.x2 + g, (b.y1 + b.y2) / 2 - h / 2, 'start');
+  }
+  return m;
+}
+const tipEl = $('#tip');
+function hideTip() { tipEl.hidden = true; }
+function showTipFor(h, e) {
+  const res = simRes;
+  if (!h || !res || simStale || h.kind === 'text') { hideTip(); return; }
+  let html = '';
+  if (tool === 'probe') {
+    const tr = traceSpecFor(h); if (!tr) { hideTip(); return; }
+    html = `クリックで <b>${esc(tr.name)}</b> を追加`;
+  } else if (res.kind === 'op') {
+    if (h.kind === 'wire') {
+      const nd = res.net.wireNode.get(h.id); if (nd == null) { hideTip(); return; }
+      html = `<b>ノード ${esc(nd < 0 ? '接地 (0 V)' : res.net.nodeName[nd])}</b><br><span class="mut">電圧</span> ${fmt(nd < 0 ? 0 : res.sols[0][nd], 'V')}`;
+    } else {
+      const en = res.net.ce.get(h.id); if (!en) { hideTip(); return; }
+      if (en.meter) { const r = meterValue(res, en, 0); html = `<b>${esc(en.name)}</b><br><span class="mut">読み</span> ${fmt(r.v, r.unit)}`; }
+      else { const r = opInfo(res, en, 0); if (!r) { hideTip(); return; } html = `<b>${esc(en.name)}</b><br><span class="mut">電圧</span> ${r.V.replace(/<br>/g, ' · ')}<br><span class="mut">電流</span> ${r.I.replace(/<br>/g, ' · ')}<br><span class="mut">電力</span> ${r.P}`; }
+    }
+  } else { hideTip(); return; }
+  const sr = stage.getBoundingClientRect();
+  tipEl.innerHTML = html; tipEl.hidden = false;
+  let x = e.clientX - sr.left + 16, y = e.clientY - sr.top + 16;
+  const tw = tipEl.offsetWidth, th = tipEl.offsetHeight;
+  if (x + tw > sr.width - 8) x = e.clientX - sr.left - tw - 12;
+  if (y + th > sr.height - 8) y = e.clientY - sr.top - th - 12;
+  tipEl.style.left = `${Math.max(8, x)}px`; tipEl.style.top = `${Math.max(8, y)}px`;
+}
+
+/* ================= waveform panel ================= */
+const DASHES = ['', '7 4', '2 3', '10 3 2 3', '4 2', '14 4'];
+function traceSpecFor(h) {
+  const res = simRes; if (!res) return null;
+  if (h.kind === 'wire') {
+    const nd = res.net.wireNode.get(h.id); if (nd == null || nd < 0) return null;
+    return { key: `n:${nd}`, name: `V(${res.net.nodeName[nd]})`, unit: 'V', get: i => res.sols[i][nd] };
+  }
+  const en = res.net.ce.get(h.id); if (!en || en.kind === 'none') return null;
+  const id = en.c.id, t = en.c.type, I = (i, k) => (res.curs[i][id] || [])[k];
+  const nv = (i, nd) => nd == null || nd < 0 ? 0 : res.sols[i][nd];
+  if (en.meter === 'V') return { key: `m:${id}`, name: en.name, unit: 'V', get: i => nv(i, en.ns[0]) - nv(i, en.ns[1]) };
+  if (en.meter === 'A') return { key: `m:${id}`, name: en.name, unit: 'A', get: i => I(i, 0) };
+  if (t === 'opamp') return { key: `n:${en.ns[2]}`, name: `V(${en.name} 出力)`, unit: 'V', get: i => nv(i, en.ns[2]) };
+  if (t === 'npn' || t === 'pnp') return { key: `c:${id}`, name: `IC(${en.name})`, unit: 'A', get: i => I(i, 1) };
+  if (t === 'nmos' || t === 'pmos') return { key: `c:${id}`, name: `ID(${en.name})`, unit: 'A', get: i => I(i, 1) };
+  if (en.src === 'v' && en.kind === 'V1') return { key: `c:${id}`, name: `I(${en.name})`, unit: 'A', get: i => -I(i, 0) };
+  if (en.src === 'v') return { key: `c:${id}`, name: `I(${en.name})`, unit: 'A', get: i => -I(i, 0) };
+  if (en.src === 'i') return { key: `n:${en.ns[1]}`, name: `V(${en.name})`, unit: 'V', get: i => nv(i, en.ns[1]) - nv(i, en.ns[0]) };
+  return { key: `c:${id}`, name: `I(${en.name})`, unit: 'A', get: i => I(i, 0) };
+}
+function probeHalo(id) {
+  const res = simRes; if (!res) return '';
+  const w = findWire(id);
+  if (w) { const nd = res.net.wireNode.get(id); return doc.wires.filter(x => res.net.wireNode.get(x.id) === nd).map(x => wireHalo(x, .14)).join(''); }
+  return highlight(id, false);
+}
+function addTrace(spec, quiet) {
+  if (!spec) return;
+  if (plot.traces.some(t => t.key === spec.key)) { if (!quiet) toast(`${spec.name} はすでに表示しています`); return; }
+  if (plot.traces.length >= 6) { toast('グラフに表示できるのは 6 本までです。不要な線を × で消してください'); return; }
+  const used = new Set(plot.traces.map(t => t.dash));
+  const dash = DASHES.findIndex((d, i) => !used.has(i));
+  plot.traces.push({ ...spec, dash: dash < 0 ? 0 : dash, vals: simRes.xs.map((_, i) => spec.get(i)) });
+  renderPlot();
+}
+function probeAt(h) {
+  if (simStale) { toast('回路が変更されています。もう一度実行してからプローブしてください'); return; }
+  const spec = traceSpecFor(h);
+  if (!spec) { toast('この位置はグラフにできません。部品か、接地以外の線をクリックしてください'); return; }
+  addTrace(spec);
+}
+function defaultTraces() {
+  plot.traces = [];
+  const ens = [...simRes.net.ce.values()];
+  ens.filter(en => en.meter).forEach(en => addTrace(traceSpecFor({ kind: 'comp', id: en.c.id }), true));
+  if (!plot.traces.length) {
+    if (simRes.kind === 'dc') {
+      const src = simRes.net.ce.get(simRes.srcId);
+      const led = ens.find(en => ['led', 'diode', 'zener'].includes(en.c.type));
+      if (led) addTrace(traceSpecFor({ kind: 'comp', id: led.c.id }), true); else if (src) addTrace(traceSpecFor({ kind: 'comp', id: src.c.id }), true);
+    } else {
+      const cap = ens.find(en => en.kind === 'C' && en.ns[0] >= 0);
+      const src = ens.find(en => en.src === 'v' && en.ns[0] >= 0);
+      if (src) addTrace({ key: `n:${src.ns[0]}`, name: `V(${simRes.net.nodeName[src.ns[0]]})`, unit: 'V', get: i => simRes.sols[i][src.ns[0]] - (src.ns[1] >= 0 ? simRes.sols[i][src.ns[1]] : 0) }, true);
+      if (cap) addTrace({ key: `vc:${cap.c.id}`, name: `V(${cap.name})`, unit: 'V', get: i => (cap.ns[0] >= 0 ? simRes.sols[i][cap.ns[0]] : 0) - (cap.ns[1] >= 0 ? simRes.sols[i][cap.ns[1]] : 0) }, true);
+    }
+  }
+}
+function openPlot(fresh) {
+  const was = !$('#plot').hidden;
+  stage.classList.add('with-plot'); $('#plot').hidden = false; $('#plot-stale').hidden = true;
+  $('#plot-title').textContent = simRes.kind === 'dc' ? `DC スイープ · ${simRes.xName}` : `過渡解析 · 0 〜 ${fmt(simRes.xs[simRes.xs.length - 1], 's')}`;
+  if (fresh) {
+    const keep = plot.traces.map(t => t.key);
+    const prev = plot.traces; plot.traces = [];
+    if (was && keep.length) {
+      for (const t of prev) {
+        let spec = null;
+        if (t.key.startsWith('n:')) { const nd = +t.key.slice(2); if (nd < simRes.net.n) spec = { key: t.key, name: `V(${simRes.net.nodeName[nd]})`, unit: 'V', get: i => simRes.sols[i][nd] }; }
+        else { const id = t.key.slice(2); if (simRes.net.ce.has(id)) spec = traceSpecFor({ kind: 'comp', id }); }
+        if (spec) addTrace(spec, true);
+      }
+    }
+    if (!plot.traces.length) defaultTraces();
+    setTool('probe');
+  }
+  requestAnimationFrame(() => { if (!was) fit(); renderPlot(); renderOverlay(); });
+}
+function closePlot() {
+  if ($('#plot').hidden) return;
+  stage.classList.remove('with-plot'); $('#plot').hidden = true;
+  if (tool === 'probe') setTool('select');
+  renderOverlay();
+}
+function niceTicks(lo, hi, count) {
+  if (!isFinite(lo) || !isFinite(hi)) { lo = 0; hi = 1; }
+  if (hi - lo < 1e-15) { const d = Math.abs(lo) * 0.1 || 1; lo -= d; hi += d; }
+  const raw = (hi - lo) / Math.max(1, count), mag = Math.pow(10, Math.floor(Math.log10(raw))), r = raw / mag;
+  const step = (r <= 1 ? 1 : r <= 2 ? 2 : r <= 2.5 ? 2.5 : r <= 5 ? 5 : 10) * mag;
+  const a = Math.floor(lo / step + 1e-9) * step, b = Math.ceil(hi / step - 1e-9) * step, out = [];
+  for (let v = a; v <= b + step * 1e-6; v += step) out.push(Math.abs(v) < step * 1e-9 ? 0 : v);
+  return { ticks: out, step };
+}
+function prefixFor(maxAbs) {
+  const P = [[1e9, 'G'], [1e6, 'M'], [1e3, 'k'], [1, ''], [1e-3, 'm'], [1e-6, 'μ'], [1e-9, 'n'], [1e-12, 'p']];
+  return P.find(p => maxAbs >= p[0] * 0.99995) || [1, ''];
+}
+const tickText = (v, p, step) => {
+  const s = step / p[0]; let d = 0;
+  while (d < 6 && Math.abs(Math.round(s * 10 ** d) - s * 10 ** d) > 1e-6 * 10 ** d) d++;
+  return (v / p[0]).toFixed(d);
+};
+let plotLayout = null;
+function chartMarkup(W, H, forExport) {
+  const res = simRes, xs = res.xs;
+  const units = ['V', 'A'].filter(u => plot.traces.some(t => t.unit === u));
+  const groups = units.length ? units : ['V'];
+  const mL = 70, mR = forExport ? 150 : 128, mT = 14, mB = 44, gap = 26;
+  const pw = Math.max(40, W - mL - mR), ph = Math.max(30, (H - mT - mB - gap * (groups.length - 1)) / groups.length);
+  const x0 = xs[0], x1 = xs[xs.length - 1], xlo = Math.min(x0, x1), xhi = Math.max(x0, x1);
+  const xP = prefixFor(Math.max(Math.abs(xlo), Math.abs(xhi)));
+  const xT = niceTicks(xlo, xhi, Math.max(3, Math.floor(pw / 90)));
+  const sx = v => mL + (xhi === xlo ? 0 : (v - xlo) / (xhi - xlo)) * pw;
+  const font = forExport ? ` font-family="${FONTS.sans}"` : '';
+  let m = forExport ? `<rect width="${W}" height="${H}" fill="#fff"/>` : '';
+  m += `<g${font} font-size="12">`;
+  const panels = [];
+  groups.forEach((u, gi) => {
+    const y0 = mT + gi * (ph + gap), trs = plot.traces.filter(t => t.unit === u);
+    let lo = Infinity, hi = -Infinity;
+    trs.forEach(t => t.vals.forEach(v => { if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }));
+    if (!isFinite(lo)) { lo = 0; hi = 1; }
+    if (lo > 0 && lo < hi * 0.25) lo = 0; if (hi < 0 && hi > lo * 0.25) hi = 0;
+    const yT = niceTicks(lo, hi, Math.max(2, Math.floor(ph / 42)));
+    const ylo = yT.ticks[0], yhi = yT.ticks[yT.ticks.length - 1];
+    const yP = prefixFor(Math.max(Math.abs(ylo), Math.abs(yhi)));
+    const sy = v => y0 + ph - (v - ylo) / (yhi - ylo || 1) * ph;
+    for (const t of yT.ticks) {
+      const y = f(sy(t));
+      m += `<line x1="${mL}" x2="${mL + pw}" y1="${y}" y2="${y}" stroke="#000" stroke-opacity="${t === 0 ? .35 : .09}" stroke-width="1"/>`;
+      m += `<text x="${mL - 8}" y="${y}" dy="0.35em" text-anchor="end" fill="#666" style="font-variant-numeric:tabular-nums">${tickText(t, yP, yT.step)}</text>`;
+    }
+    for (const t of xT.ticks) { const x = f(sx(t)); if (x < mL - 0.5 || x > mL + pw + 0.5) continue; m += `<line x1="${x}" x2="${x}" y1="${y0}" y2="${y0 + ph}" stroke="#000" stroke-opacity=".06"/>`; }
+    m += `<rect x="${mL}" y="${y0}" width="${pw}" height="${ph}" fill="none" stroke="#000" stroke-opacity=".18"/>`;
+    m += `<text transform="translate(${16} ${f(y0 + ph / 2)}) rotate(-90)" text-anchor="middle" fill="#666">${u === 'V' ? '電圧' : '電流'} [${yP[1]}${u}]</text>`;
+    const labels = [];
+    for (const t of trs) {
+      let d = '', pen = false;
+      t.vals.forEach((v, i) => { if (!isFinite(v)) { pen = false; return; } d += `${pen ? 'L' : 'M'}${f(sx(xs[i]))} ${f(sy(v))}`; pen = true; });
+      m += `<path d="${d}" fill="none" stroke="#000" stroke-width="1.75" stroke-linejoin="round"${DASHES[t.dash] ? ` stroke-dasharray="${DASHES[t.dash]}"` : ''}/>`;
+      let li = t.vals.length - 1; while (li > 0 && !isFinite(t.vals[li])) li--;
+      if (isFinite(t.vals[li])) labels.push({ y: sy(t.vals[li]), name: t.name });
+    }
+    labels.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 14) labels[i].y = labels[i - 1].y + 14;
+    for (const l of labels) m += `<text x="${mL + pw + 8}" y="${f(Math.min(y0 + ph, Math.max(y0, l.y)))}" dy="0.35em" fill="#000" font-weight="500">${esc(l.name)}</text>`;
+    panels.push({ y0, ph, sy, trs, u });
+  });
+  const yb = mT + groups.length * ph + gap * (groups.length - 1);
+  for (const t of xT.ticks) { const x = sx(t); if (x < mL - 0.5 || x > mL + pw + 0.5) continue; m += `<text x="${f(x)}" y="${yb + 18}" text-anchor="middle" fill="#666" style="font-variant-numeric:tabular-nums">${tickText(t, xP, xT.step)}</text>`; }
+  m += `<text x="${f(mL + pw / 2)}" y="${yb + 38}" text-anchor="middle" fill="#666">${esc(res.xName)} [${xP[1]}${res.xUnit}]</text>`;
+  m += '</g>';
+  if (!forExport) plotLayout = { mL, pw, sx, xlo, xhi, panels, yb };
+  return m;
+}
+function renderPlot() {
+  if (!simRes || simRes.kind === 'op' || $('#plot').hidden) return;
+  const body = $('#plot-body'), W = body.clientWidth, H = body.clientHeight;
+  if (W < 60 || H < 60) return;
+  const ps = $('#plot-svg'); ps.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  ps.innerHTML = chartMarkup(W, H, false) + '<g id="plot-hover"></g>';
+  renderLegend(null);
+}
+function renderLegend(idx) {
+  const L = $('#plot-legend');
+  const xs = simRes.xs, xv = idx == null ? null : xs[idx];
+  let m = `<span class="lg-x">${xv == null ? (plot.traces.length ? 'グラフにカーソルを合わせると値を表示' : 'プローブで線や部品をクリックしてください') : `${esc(simRes.xName)} = ${fmt(xv, simRes.xUnit)}`}</span>`;
+  m += plot.traces.map((t, i) => `<span class="lg"><svg width="26" height="10" aria-hidden="true"><line x1="1" y1="5" x2="25" y2="5" stroke="#000" stroke-width="2"${DASHES[t.dash] ? ` stroke-dasharray="${DASHES[t.dash]}"` : ''}/></svg>${esc(t.name)}<span class="lg-val">${idx == null ? '' : fmt(t.vals[idx], t.unit)}</span><button type="button" data-rm="${i}" aria-label="${esc(t.name)} を消す">×</button></span>`).join('');
+  L.innerHTML = m;
+}
+$('#plot-legend').addEventListener('click', e => { const b = e.target.closest('[data-rm]'); if (!b) return; plot.traces.splice(+b.dataset.rm, 1); renderPlot(); });
+$('#plot-svg').addEventListener('pointermove', e => {
+  if (!plotLayout || !simRes || !plot.traces.length) return;
+  const r = e.currentTarget.getBoundingClientRect(), px = e.clientX - r.left, L = plotLayout;
+  if (px < L.mL - 10 || px > L.mL + L.pw + 10) { $('#plot-hover').innerHTML = ''; renderLegend(null); return; }
+  const xv = L.xlo + clamp((px - L.mL) / L.pw, 0, 1) * (L.xhi - L.xlo), xs = simRes.xs;
+  let best = 0, bd = Infinity; const asc = xs[xs.length - 1] >= xs[0];
+  let lo = 0, hi = xs.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if ((xs[mid] < xv) === asc) lo = mid; else hi = mid; }
+  for (const i of [lo, hi]) { const d = Math.abs(xs[i] - xv); if (d < bd) { bd = d; best = i; } }
+  const x = f(L.sx(xs[best]));
+  let m = `<line x1="${x}" x2="${x}" y1="${L.panels[0].y0}" y2="${L.yb}" stroke="#000" stroke-opacity=".35" stroke-dasharray="3 3"/>`;
+  for (const p of L.panels) for (const t of p.trs) { const v = t.vals[best]; if (isFinite(v)) m += `<circle cx="${x}" cy="${f(p.sy(v))}" r="4" fill="#fff" stroke="#000" stroke-width="1.5"/>`; }
+  $('#plot-hover').innerHTML = m; renderLegend(best);
+});
+$('#plot-svg').addEventListener('pointerleave', () => { const h = $('#plot-hover'); if (h) h.innerHTML = ''; if (simRes && simRes.kind !== 'op') renderLegend(null); });
+$('#plot-probe').addEventListener('click', () => setTool(tool === 'probe' ? 'select' : 'probe'));
+$('#plot-close').addEventListener('click', () => { closePlot(); });
+$('#plot-csv').addEventListener('click', () => {
+  if (!simRes || !plot.traces.length) { toast('グラフに線がありません'); return; }
+  const head = [`${simRes.xName} [${simRes.xUnit}]`, ...plot.traces.map(t => `${t.name} [${t.unit}]`)];
+  const q = s => /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  const rows = simRes.xs.map((x, i) => [x, ...plot.traces.map(t => t.vals[i])].map(v => isFinite(v) ? Number(v.toPrecision(8)) : '').join(','));
+  saveFile(`${fileBase()}-${simRes.kind === 'dc' ? 'DCスイープ' : '過渡解析'}.csv`, '﻿' + [head.map(q).join(','), ...rows].join('\r\n'));
+});
+$('#plot-png').addEventListener('click', async () => {
+  if (!simRes || !plot.traces.length) { toast('グラフに線がありません'); return; }
+  const groups = new Set(plot.traces.map(t => t.unit)).size || 1;
+  const W = 820, H = 90 + groups * 250;
+  const s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W * 2}" height="${H * 2}" viewBox="0 0 ${W} ${H}">${chartMarkup(W, H, true)}</svg>`;
+  try { const blob = await svgToPng(s, W * 2, H * 2, 192); saveFile(`${fileBase()}-グラフ.png`, blob); } catch (_) { toast('グラフ画像を作れませんでした'); }
+});
+new ResizeObserver(() => renderPlot()).observe($('#plot-body'));
 
 /* ================= files, export ================= */
 const dlReady = (window.claude && typeof window.claude.use === 'function') ? Promise.resolve(window.claude.use('downloads')).catch(() => null) : Promise.resolve(null);
@@ -1202,7 +2094,7 @@ $('#file-input').addEventListener('change', async e => {
   try {
     const o = JSON.parse(await file.text());
     if (!o || !Array.isArray(o.comps) || !Array.isArray(o.wires)) throw new Error('shape');
-    doc = normalize(o); sel.clear(); draft = null; setTool('select'); commit(); renderPalette(); syncTitle(); requestAnimationFrame(fit);
+    doc = normalize(o); sel.clear(); draft = null; clearSim(); setTool('select'); commit(); renderPalette(); syncTitle(); requestAnimationFrame(fit);
     toast(`${file.name} を開きました`);
   } catch (_) { toast('回路図ノートで保存した .json ファイルを選んでください'); }
 });
@@ -1228,13 +2120,16 @@ async function withDPI(blob, dpi) {
   const out = new Uint8Array(buf.length + 21); out.set(buf.slice(0, 33)); out.set(chunk, 33); out.set(buf.slice(33), 54);
   return new Blob([out], { type: 'image/png' });
 }
+async function svgToPng(svgStr, w, h, dpi) {
+  const img = new Image(); img.src = svgURL(svgStr); await img.decode();
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  cv.getContext('2d').drawImage(img, 0, 0, w, h);
+  const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+  return withDPI(blob, dpi);
+}
 async function pngBlob() {
   const r = buildSVG(EX.scale); if (!r) throw new Error('empty');
-  const img = new Image(); img.src = svgURL(r.svg); await img.decode();
-  const cv = document.createElement('canvas'); cv.width = r.w * EX.scale; cv.height = r.h * EX.scale;
-  cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-  const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
-  return withDPI(blob, 96 * EX.scale);
+  return svgToPng(r.svg, r.w * EX.scale, r.h * EX.scale, 96 * EX.scale);
 }
 const EX_OPTS = { bg: [['white', '白'], ['clear', '透明']], scale: [[1, '1×'], [2, '2×'], [3, '3×'], [4, '4×']], margin: [[8, '狭い'], [20, '標準'], [40, '広い']] };
 function renderExport() {
@@ -1271,7 +2166,7 @@ function askNew() { $('#confirm-modal').hidden = false; $('#cf-cancel').focus();
 $('#cf-cancel').addEventListener('click', () => { $('#confirm-modal').hidden = true; });
 $('#confirm-modal').addEventListener('pointerdown', e => { if (e.target.id === 'confirm-modal') $('#confirm-modal').hidden = true; });
 $('#cf-ok').addEventListener('click', () => {
-  $('#confirm-modal').hidden = true; doc = blankDoc(); sel.clear(); draft = null; setTool('select'); commit(); renderPalette(); syncTitle();
+  $('#confirm-modal').hidden = true; doc = blankDoc(); sel.clear(); draft = null; clearSim(); setTool('select'); commit(); renderPalette(); syncTitle();
   const r = svg.getBoundingClientRect(); view = { x: Math.round(r.width / 2 / G) * G, y: Math.round(r.height / 2 / G) * G, k: 1 }; applyView();
   toast('新しい回路図を作成しました');
 });
@@ -1295,6 +2190,7 @@ $('#palette').addEventListener('click', e => {
 });
 document.querySelectorAll('.tbtn[data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
 $('#btn-finish').addEventListener('click', finishWire);
+$('#btn-run').addEventListener('click', () => runSim());
 $('#btn-undo').addEventListener('click', undo);
 $('#btn-redo').addEventListener('click', redo);
 $('#btn-zin').addEventListener('click', () => zoomCenter(1.25));
@@ -1313,13 +2209,14 @@ window.addEventListener('resize', () => renderOverlay());
 (function boot() {
   let saved = null;
   try { const raw = localStorage.getItem(STORE_KEY); if (raw) saved = JSON.parse(raw); } catch (_) {}
-  doc = saved && Array.isArray(saved.comps) ? normalize(saved) : sampleDoc();
+  const isSample = !(saved && Array.isArray(saved.comps));
+  doc = isSample ? sampleDoc() : normalize(saved);
   hist = [JSON.stringify(doc)]; hi = 0;
   syncTitle(); renderPalette(); renderCanvas(); renderProps(); updateUndo(); setTool('select');
+  if (isSample) { doc.sim.an = 'op'; runSim({ silent: true }); setRtab('sim'); }
   requestAnimationFrame(() => requestAnimationFrame(fit));
 })();
 })();
 </script>
-
 </body>
 </html>
